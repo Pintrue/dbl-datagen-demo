@@ -70,9 +70,17 @@ Throughout all commands below, replace these placeholders with your actual value
 
 ### 1. Upload sample data files (one-time)
 
+Upload the `.dat` files to a UC Volume. By default the pipeline expects them at `/Volumes/YOUR_CATALOG/YOUR_SCHEMA/radial_sample/RADIALSAMPLE/`:
+
 ```bash
 databricks fs cp -r ./sample_data/ \
   dbfs:/Volumes/YOUR_CATALOG/YOUR_SCHEMA/radial_sample/RADIALSAMPLE/
+```
+
+If your files are at a different path, pass it as a variable in the deploy command instead:
+
+```bash
+-var="volume_path=/Volumes/YOUR_CATALOG/YOUR_SCHEMA/your/custom/path"
 ```
 
 ### 2. Update the dashboard queries (one-time)

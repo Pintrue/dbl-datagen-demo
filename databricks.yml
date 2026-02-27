@@ -20,16 +20,19 @@ variables:
   warehouse_id:
     description: SQL Warehouse ID for dashboard queries
     default: "<YOUR_WAREHOUSE_ID>"
+  volume_path:
+    description: "Optional: full path to the directory containing the RADIAL .dat files. Defaults to /Volumes/{catalog}/{sample_schema}/radial_sample/RADIALSAMPLE"
+    default: ""
 
 # Deployment targets:
 #
 # DEV (default) — lightweight dataset in a separate schema, no dashboard:
-#   databricks bundle deploy --profile <profile>
+#   databricks bundle deploy -var="catalog=YOUR_CATALOG" -var="schema=YOUR_SCHEMA"
 #   databricks bundle run atlas_radial_data_generation
 #   → schema: dev_<username>_<schema>, scale: 0.1 (~2M risk rows, fast)
 #
 # PROD — full-scale dataset + dashboard:
-#   databricks bundle deploy --target prod --profile <profile>
+#   databricks bundle deploy --target prod -var="catalog=YOUR_CATALOG" -var="schema=YOUR_SCHEMA" -var="warehouse_id=YOUR_WAREHOUSE_ID"
 #   databricks bundle run atlas_radial_data_generation --target prod
 #   → schema: <schema>, scale: 1.0 (~20M risk rows)
 
@@ -99,6 +102,7 @@ resources:
               scale: ${var.scale}
               years: ${var.years}
               partitions: "8"
+              sample_dir_override: ${var.volume_path}
         - task_key: setup_gold_views
           depends_on:
             - task_key: generate_data
