@@ -1,0 +1,1379 @@
+{
+  "datasets": [
+    {
+      "name": "ds_pos_ccy",
+      "displayName": "Position by Currency",
+      "queryLines": [
+        "SELECT * FROM <YOUR_CATALOG>.<YOUR_SCHEMA>.gold_position_by_currency"
+      ]
+    },
+    {
+      "name": "ds_book_hier",
+      "displayName": "Book Hierarchy",
+      "queryLines": [
+        "SELECT * FROM <YOUR_CATALOG>.<YOUR_SCHEMA>.gold_book_hierarchy"
+      ]
+    },
+    {
+      "name": "ds_instr",
+      "displayName": "Instrument Breakdown",
+      "queryLines": [
+        "SELECT * FROM <YOUR_CATALOG>.<YOUR_SCHEMA>.gold_instrument_breakdown"
+      ]
+    },
+    {
+      "name": "ds_fx",
+      "displayName": "FX Rates Summary",
+      "queryLines": [
+        "SELECT CONCAT(Base_Currency, '/', Reporting_Currency) AS Currency_Pair, ROUND(min_rate, 4) AS min_rate, ROUND(max_rate, 4) AS max_rate, ROUND(avg_rate, 4) AS avg_rate FROM <YOUR_CATALOG>.<YOUR_SCHEMA>.gold_fx_rates_summary ORDER BY Currency_Pair"
+      ]
+    },
+    {
+      "name": "ds_greeks",
+      "displayName": "Risk Greeks Exposure",
+      "queryLines": [
+        "SELECT * FROM <YOUR_CATALOG>.<YOUR_SCHEMA>.gold_risk_greeks_exposure"
+      ]
+    },
+    {
+      "name": "ds_ccy_risk",
+      "displayName": "Currency Risk (DELTA)",
+      "queryLines": [
+        "SELECT Currency_Id, total_exposure FROM <YOUR_CATALOG>.<YOUR_SCHEMA>.gold_currency_risk_exposure WHERE Sensitivity_Type = 'FxDelta'"
+      ]
+    },
+    {
+      "name": "ds_book_risk",
+      "displayName": "Book Risk Exposure",
+      "queryLines": [
+        "SELECT Book_Location_Code AS Location_Code, Sensitivity_Type, SUM(total_sensitivity) AS Total_Exposure FROM <YOUR_CATALOG>.<YOUR_SCHEMA>.gold_book_risk_exposure GROUP BY Book_Location_Code, Sensitivity_Type ORDER BY Total_Exposure DESC"
+      ]
+    },
+    {
+      "name": "ds_book_delta",
+      "displayName": "Book Risk (DELTA)",
+      "queryLines": [
+        "SELECT Book_Location_Code AS Location_Code, SUM(total_sensitivity) AS Total_Exposure FROM <YOUR_CATALOG>.<YOUR_SCHEMA>.gold_book_risk_exposure WHERE Sensitivity_Type = 'Delta' GROUP BY Book_Location_Code ORDER BY Total_Exposure DESC"
+      ]
+    },
+    {
+      "name": "ds_risk_monthly",
+      "displayName": "Risk Exposure Monthly",
+      "queryLines": [
+        "SELECT * FROM <YOUR_CATALOG>.<YOUR_SCHEMA>.gold_risk_exposure_monthly ORDER BY Business_Month"
+      ]
+    },
+    {
+      "name": "ds_fx_ts",
+      "displayName": "FX Rates Timeseries",
+      "queryLines": [
+        "SELECT * FROM <YOUR_CATALOG>.<YOUR_SCHEMA>.gold_fx_rates_timeseries ORDER BY Business_Month"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "13459bd3",
+      "displayName": "Position Overview",
+      "layout": [
+        {
+          "widget": {
+            "name": "45c4538b",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_pos_ccy",
+                  "fields": [
+                    {
+                      "name": "sum(position_count)",
+                      "expression": "SUM(`position_count`)"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(position_count)",
+                  "displayName": "Total Positions"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Total Positions"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "7673d210",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_pos_ccy",
+                  "fields": [
+                    {
+                      "name": "Currency_Code",
+                      "expression": "`Currency_Code`"
+                    },
+                    {
+                      "name": "sum(total_quantity)",
+                      "expression": "SUM(`total_quantity`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "Currency_Code",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  },
+                  "displayName": "Currency"
+                },
+                "y": {
+                  "fieldName": "sum(total_quantity)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "SUM of total_quantity"
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Top Currencies by Position Quantity"
+              },
+              "mark": {
+                "colors": [
+                  "#FFAB00",
+                  "#00A972",
+                  "#FF3621",
+                  "#8BCAE7",
+                  "#AB4057",
+                  "#99DDB4",
+                  "#FCA4A1",
+                  "#919191",
+                  "#BF7080"
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 4,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "37bad5db",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_book_hier",
+                  "fields": [
+                    {
+                      "name": "Book_Location_Code",
+                      "expression": "`Book_Location_Code`"
+                    },
+                    {
+                      "name": "sum(book_count)",
+                      "expression": "SUM(`book_count`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "Book_Location_Code",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Location"
+                },
+                "y": {
+                  "fieldName": "sum(book_count)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "SUM of book_count"
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Books by Location"
+              },
+              "mark": {
+                "colors": [
+                  "#FFAB00",
+                  "#00A972",
+                  "#FF3621",
+                  "#8BCAE7",
+                  "#AB4057",
+                  "#99DDB4",
+                  "#FCA4A1",
+                  "#919191",
+                  "#BF7080"
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 3,
+            "width": 2,
+            "height": 4
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
+    },
+    {
+      "name": "b368e547",
+      "displayName": "Instruments & FX",
+      "layout": [
+        {
+          "widget": {
+            "name": "efccac31",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_instr",
+                  "fields": [
+                    {
+                      "name": "sum(instrument_count)",
+                      "expression": "SUM(`instrument_count`)"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(instrument_count)",
+                  "displayName": "Total Instruments"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Total Instruments"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "f5efd7d7",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_instr",
+                  "fields": [
+                    {
+                      "name": "instrument_type",
+                      "expression": "`instrument_type`"
+                    },
+                    {
+                      "name": "sum(instrument_count)",
+                      "expression": "SUM(`instrument_count`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "instrument_type",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  },
+                  "displayName": "Instrument Type"
+                },
+                "y": {
+                  "fieldName": "sum(instrument_count)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "SUM of instrument_count"
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Instruments by Type"
+              },
+              "mark": {
+                "colors": [
+                  "#FFAB00",
+                  "#00A972",
+                  "#FF3621",
+                  "#8BCAE7",
+                  "#AB4057",
+                  "#99DDB4",
+                  "#FCA4A1",
+                  "#919191",
+                  "#BF7080"
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "dc8bf537",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_fx",
+                  "fields": [
+                    {
+                      "name": "Currency_Pair",
+                      "expression": "`Currency_Pair`"
+                    },
+                    {
+                      "name": "min_rate",
+                      "expression": "`min_rate`"
+                    },
+                    {
+                      "name": "max_rate",
+                      "expression": "`max_rate`"
+                    },
+                    {
+                      "name": "avg_rate",
+                      "expression": "`avg_rate`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "Currency_Pair",
+                    "type": "string",
+                    "displayAs": "string",
+                    "title": "Pair",
+                    "displayName": "Pair"
+                  },
+                  {
+                    "fieldName": "min_rate",
+                    "type": "number",
+                    "displayAs": "number",
+                    "title": "Min",
+                    "displayName": "Min",
+                    "numberFormat": "0.0000"
+                  },
+                  {
+                    "fieldName": "max_rate",
+                    "type": "number",
+                    "displayAs": "number",
+                    "title": "Max",
+                    "displayName": "Max",
+                    "numberFormat": "0.0000"
+                  },
+                  {
+                    "fieldName": "avg_rate",
+                    "type": "number",
+                    "displayAs": "number",
+                    "title": "Avg",
+                    "displayName": "Avg",
+                    "numberFormat": "0.0000"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "FX Rate Summary"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 3,
+            "width": 2,
+            "height": 10
+          }
+        },
+        {
+          "widget": {
+            "name": "c0ec4084",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_instr",
+                  "fields": [
+                    {
+                      "name": "Class_Code",
+                      "expression": "`Class_Code`"
+                    },
+                    {
+                      "name": "sum(instrument_count)",
+                      "expression": "SUM(`instrument_count`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "Class_Code",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Class Code"
+                },
+                "y": {
+                  "fieldName": "sum(instrument_count)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "SUM of instrument_count"
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Instruments by Class"
+              },
+              "mark": {
+                "colors": [
+                  "#FFAB00",
+                  "#00A972",
+                  "#FF3621",
+                  "#8BCAE7",
+                  "#AB4057",
+                  "#99DDB4",
+                  "#FCA4A1",
+                  "#919191",
+                  "#BF7080"
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 6,
+            "width": 4,
+            "height": 5
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
+    },
+    {
+      "name": "d913397e",
+      "displayName": "Risk Greeks Exposure",
+      "layout": [
+        {
+          "widget": {
+            "name": "096e9e05",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_greeks",
+                  "fields": [
+                    {
+                      "name": "sum(total_exposure)",
+                      "expression": "SUM(`total_exposure`)"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(total_exposure)",
+                  "displayName": "Total Risk Exposure"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Total Risk Exposure"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "648961bc",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_greeks",
+                  "fields": [
+                    {
+                      "name": "Sensitivity_Type",
+                      "expression": "`Sensitivity_Type`"
+                    },
+                    {
+                      "name": "sum(total_exposure)",
+                      "expression": "SUM(`total_exposure`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "Sensitivity_Type",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  },
+                  "displayName": "Sensitivity_Type"
+                },
+                "y": {
+                  "fieldName": "sum(total_exposure)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "SUM of total_exposure"
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Total Exposure by Sensitivity Type"
+              },
+              "mark": {
+                "colors": [
+                  "#FF3621",
+                  "#FFAB00",
+                  "#00A972",
+                  "#8BCAE7",
+                  "#AB4057"
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 4,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "3f586cb2",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_ccy_risk",
+                  "fields": [
+                    {
+                      "name": "Currency_Id",
+                      "expression": "`Currency_Id`"
+                    },
+                    {
+                      "name": "sum(total_exposure)",
+                      "expression": "SUM(`total_exposure`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "Currency_Id",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  },
+                  "displayName": "Currency ID"
+                },
+                "y": {
+                  "fieldName": "sum(total_exposure)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "SUM of total_exposure"
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Delta Exposure by Currency"
+              },
+              "mark": {
+                "colors": [
+                  "#FFAB00",
+                  "#00A972",
+                  "#FF3621",
+                  "#8BCAE7",
+                  "#AB4057",
+                  "#99DDB4",
+                  "#FCA4A1",
+                  "#919191",
+                  "#BF7080"
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 3,
+            "width": 2,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "394f4232",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_greeks",
+                  "fields": [
+                    {
+                      "name": "Sensitivity_Type",
+                      "expression": "`Sensitivity_Type`"
+                    },
+                    {
+                      "name": "sum(record_count)",
+                      "expression": "SUM(`record_count`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "Sensitivity_Type",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Sensitivity_Type"
+                },
+                "y": {
+                  "fieldName": "sum(record_count)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "SUM of record_count"
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Record Count by Sensitivity Type"
+              },
+              "mark": {
+                "colors": [
+                  "#FFAB00",
+                  "#00A972",
+                  "#FF3621",
+                  "#8BCAE7",
+                  "#AB4057",
+                  "#99DDB4",
+                  "#FCA4A1",
+                  "#919191",
+                  "#BF7080"
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 7,
+            "width": 6,
+            "height": 5
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
+    },
+    {
+      "name": "dd524b61",
+      "displayName": "Book Risk",
+      "layout": [
+        {
+          "widget": {
+            "name": "93a74ca2",
+            "queries": [
+              {
+                "name": "filter_93a74ca2_Sensitivity_Type",
+                "query": {
+                  "datasetName": "ds_book_risk",
+                  "fields": [
+                    {
+                      "name": "Sensitivity_Type",
+                      "expression": "`Sensitivity_Type`"
+                    },
+                    {
+                      "name": "Sensitivity_Type_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "Sensitivity_Type",
+                    "displayName": "Sensitivity_Type",
+                    "queryName": "filter_93a74ca2_Sensitivity_Type"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Sensitivity Type"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "cb49b19c",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_book_delta",
+                  "fields": [
+                    {
+                      "name": "Location_Code",
+                      "expression": "`Location_Code`"
+                    },
+                    {
+                      "name": "sum(Total_Exposure)",
+                      "expression": "SUM(`Total_Exposure`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "Location_Code",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  },
+                  "displayName": "Location_Code"
+                },
+                "y": {
+                  "fieldName": "sum(Total_Exposure)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "SUM of Total_Exposure"
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Delta Exposure by Location"
+              },
+              "mark": {
+                "colors": [
+                  "#FF3621"
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 0,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "bc079262",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_book_risk",
+                  "fields": [
+                    {
+                      "name": "Location_Code",
+                      "expression": "`Location_Code`"
+                    },
+                    {
+                      "name": "Sensitivity_Type",
+                      "expression": "`Sensitivity_Type`"
+                    },
+                    {
+                      "name": "Total_Exposure",
+                      "expression": "`Total_Exposure`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "Location_Code",
+                    "type": "string",
+                    "displayAs": "string",
+                    "title": "Location",
+                    "displayName": "Location"
+                  },
+                  {
+                    "fieldName": "Sensitivity_Type",
+                    "type": "string",
+                    "displayAs": "string",
+                    "title": "Sensitivity Type",
+                    "displayName": "Sensitivity Type"
+                  },
+                  {
+                    "fieldName": "Total_Exposure",
+                    "type": "number",
+                    "displayAs": "number",
+                    "title": "Total Exposure",
+                    "displayName": "Total Exposure",
+                    "numberFormat": "#,##0.00"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Book Risk by Location & Sensitivity"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 6,
+            "height": 7
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
+    },
+    {
+      "name": "a7e3f1b2",
+      "displayName": "Historical Trends",
+      "layout": [
+        {
+          "widget": {
+            "name": "d4f8a201",
+            "queries": [
+              {
+                "name": "filter_d4f8a201_Business_Month",
+                "query": {
+                  "datasetName": "ds_risk_monthly",
+                  "fields": [
+                    {
+                      "name": "Business_Month",
+                      "expression": "`Business_Month`"
+                    },
+                    {
+                      "name": "Business_Month_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-date-range-picker",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "Business_Month",
+                    "displayName": "Date Range",
+                    "queryName": "filter_d4f8a201_Business_Month"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Date Range"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "b3c7e502",
+            "queries": [
+              {
+                "name": "filter_b3c7e502_Sensitivity_Type",
+                "query": {
+                  "datasetName": "ds_risk_monthly",
+                  "fields": [
+                    {
+                      "name": "Sensitivity_Type",
+                      "expression": "`Sensitivity_Type`"
+                    },
+                    {
+                      "name": "Sensitivity_Type_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "Sensitivity_Type",
+                    "displayName": "Sensitivity Type",
+                    "queryName": "filter_b3c7e502_Sensitivity_Type"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Greek Filter"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "e5a9d603",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_risk_monthly",
+                  "fields": [
+                    {
+                      "name": "Business_Month",
+                      "expression": "`Business_Month`"
+                    },
+                    {
+                      "name": "Sensitivity_Type",
+                      "expression": "`Sensitivity_Type`"
+                    },
+                    {
+                      "name": "total_exposure",
+                      "expression": "SUM(`total_exposure`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "Business_Month",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Month"
+                },
+                "y": {
+                  "fieldName": "total_exposure",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Total Exposure"
+                },
+                "color": {
+                  "fieldName": "Sensitivity_Type",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Greek"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Risk Exposure Over Time by Sensitivity Type"
+              },
+              "mark": {
+                "colors": [
+                  "#FF3621",
+                  "#FFAB00",
+                  "#00A972",
+                  "#8BCAE7",
+                  "#AB4057"
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 6,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "c2d3e906",
+            "queries": [
+              {
+                "name": "filter_c2d3e906_Currency_Pair",
+                "query": {
+                  "datasetName": "ds_fx_ts",
+                  "fields": [
+                    {
+                      "name": "Currency_Pair",
+                      "expression": "`Currency_Pair`"
+                    },
+                    {
+                      "name": "Currency_Pair_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "Currency_Pair",
+                    "displayName": "Currency Pair",
+                    "queryName": "filter_c2d3e906_Currency_Pair"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Currency Pair"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "f6b0e704",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_fx_ts",
+                  "fields": [
+                    {
+                      "name": "Business_Month",
+                      "expression": "`Business_Month`"
+                    },
+                    {
+                      "name": "Currency_Pair",
+                      "expression": "`Currency_Pair`"
+                    },
+                    {
+                      "name": "avg_rate",
+                      "expression": "AVG(`avg_rate`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "Business_Month",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Month"
+                },
+                "y": {
+                  "fieldName": "avg_rate",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Avg FX Rate"
+                },
+                "color": {
+                  "fieldName": "Currency_Pair",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Currency Pair"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "FX Rate Trends Over Time"
+              },
+              "mark": {
+                "colors": [
+                  "#FFAB00",
+                  "#00A972",
+                  "#FF3621",
+                  "#8BCAE7",
+                  "#AB4057",
+                  "#99DDB4"
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 10,
+            "width": 6,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "a1c2d805",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_risk_monthly",
+                  "fields": [
+                    {
+                      "name": "Business_Month",
+                      "expression": "`Business_Month`"
+                    },
+                    {
+                      "name": "Sensitivity_Type",
+                      "expression": "`Sensitivity_Type`"
+                    },
+                    {
+                      "name": "total_exposure",
+                      "expression": "`total_exposure`"
+                    },
+                    {
+                      "name": "record_count",
+                      "expression": "`record_count`"
+                    },
+                    {
+                      "name": "avg_sensitivity",
+                      "expression": "`avg_sensitivity`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "Business_Month",
+                    "type": "date",
+                    "displayAs": "date",
+                    "title": "Month",
+                    "displayName": "Month",
+                    "dateTimeFormat": "YYYY-MM"
+                  },
+                  {
+                    "fieldName": "Sensitivity_Type",
+                    "type": "string",
+                    "displayAs": "string",
+                    "title": "Greek",
+                    "displayName": "Greek"
+                  },
+                  {
+                    "fieldName": "total_exposure",
+                    "type": "number",
+                    "displayAs": "number",
+                    "title": "Total Exposure",
+                    "displayName": "Total Exposure",
+                    "numberFormat": "#,##0.00"
+                  },
+                  {
+                    "fieldName": "record_count",
+                    "type": "number",
+                    "displayAs": "number",
+                    "title": "Records",
+                    "displayName": "Records",
+                    "numberFormat": "#,##0"
+                  },
+                  {
+                    "fieldName": "avg_sensitivity",
+                    "type": "number",
+                    "displayAs": "number",
+                    "title": "Avg Sensitivity",
+                    "displayName": "Avg Sensitivity",
+                    "numberFormat": "0.0000"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Monthly Risk Detail"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 17,
+            "width": 6,
+            "height": 6
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    },
+    "applyModeEnabled": false
+  }
+}

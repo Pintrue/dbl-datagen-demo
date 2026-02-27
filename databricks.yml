@@ -1,0 +1,120 @@
+bundle:
+  name: atlas-radial-risk-intelligence
+
+variables:
+  catalog:
+    description: Unity Catalog catalog name
+    default: "<YOUR_CATALOG>"
+  schema:
+    description: Unity Catalog schema name (output tables written here)
+    default: "<YOUR_SCHEMA>"
+  sample_schema:
+    description: Schema where the sample .dat Volume lives (shared across targets)
+    default: "<YOUR_SCHEMA>"
+  scale:
+    description: "Data generation scale multiplier (0.1=dev ~2M risk rows, 1.0=demo ~20M risk rows)"
+    default: "1.0"
+  years:
+    description: "Years of history to generate (dev=1, prod=10)"
+    default: "10"
+  warehouse_id:
+    description: SQL Warehouse ID for dashboard queries
+    default: "<YOUR_WAREHOUSE_ID>"
+
+# Deployment targets:
+#
+# DEV (default) — lightweight dataset in a separate schema, no dashboard:
+#   databricks bundle deploy --profile <profile>
+#   databricks bundle run atlas_radial_data_generation
+#   → schema: dev_<username>_<schema>, scale: 0.1 (~2M risk rows, fast)
+#
+# PROD — full-scale dataset + dashboard:
+#   databricks bundle deploy --target prod --profile <profile>
+#   databricks bundle run atlas_radial_data_generation --target prod
+#   → schema: <schema>, scale: 1.0 (~20M risk rows)
+
+targets:
+  dev:
+    # Lightweight dev dataset — job only, no dashboard.
+    mode: development
+    default: true
+    variables:
+      schema: dev_${workspace.current_user.short_name}_${var.schema}
+      scale: "0.1"
+      years: "1"
+    resources:
+      schemas:
+        dev_schema:
+          name: ${var.schema}
+          catalog_name: ${var.catalog}
+          comment: "Atlas RADIAL dev dataset — scale=0.1, ~2M risk rows"
+      jobs:
+        atlas_radial_data_generation:
+          name: "[dev] Atlas RADIAL - Data Generation"
+
+  prod:
+    # Full-scale dataset + dashboard.
+    mode: production
+    workspace:
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      schema: ${var.schema}
+      scale: "1.0"
+    resources:
+      jobs:
+        atlas_radial_data_generation:
+          name: "Atlas RADIAL - Data Generation"
+      dashboards:
+        atlas_radial_risk_intelligence:
+          display_name: "Atlas RADIAL - Risk Intelligence Dashboard"
+          file_path: ./resources/atlas_radial_risk.lvdash.json
+          warehouse_id: ${var.warehouse_id}
+
+resources:
+  jobs:
+    atlas_radial_data_generation:
+      name: "Atlas RADIAL - Data Generation"
+      description: "Generates synthetic RADIAL trading data, gold views, and Genie space"
+      environments:
+        - environment_key: default
+          spec:
+            client: "1"
+            dependencies:
+              - "dbldatagen"
+              - "numpy<2"
+        - environment_key: genie
+          spec:
+            client: "1"
+            dependencies:
+              - "databricks-sdk>=0.40.0"
+      tasks:
+        - task_key: generate_data
+          environment_key: default
+          notebook_task:
+            notebook_path: ./notebooks/01_generate_data.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              sample_schema: ${var.sample_schema}
+              scale: ${var.scale}
+              years: ${var.years}
+              partitions: "8"
+        - task_key: setup_gold_views
+          depends_on:
+            - task_key: generate_data
+          environment_key: default
+          notebook_task:
+            notebook_path: ./setup/gold_views_setup.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+        - task_key: setup_genie_space
+          depends_on:
+            - task_key: setup_gold_views
+          environment_key: genie
+          notebook_task:
+            notebook_path: ./notebooks/02_setup_genie_space.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              warehouse_id: ${var.warehouse_id}
