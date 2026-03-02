@@ -64,14 +64,16 @@ print(f"Sample dir: {SAMPLE_DIR}")
 # COMMAND ----------
 
 ROW_TARGETS = {
-    "book_universe":       int(20_000   * SCALE),   # production: ~20K books
-    "instrument":          int(10_000   * SCALE),
-    "radial_instrument":   int(10_000   * SCALE),
-    "fx_rates":            int(50_000   * SCALE),
-    "position":            int(500_000  * SCALE),   # production: ~500K positions
-    "package_composition": int(100_000  * SCALE),
+    "book_universe":       int(2_000      * SCALE),  # 2K books
+    "instrument":          int(400_000    * SCALE),  # 300-500K, midpoint
+    "radial_instrument":   int(400_000    * SCALE),  # matched to instrument
+    "fx_rates":            int(50_000     * SCALE),
+    "position":            int(750_000    * SCALE),  # 500K-1M, midpoint
+    "package_composition": int(400_000    * SCALE),  # 300-500K, midpoint
+    "radial_arbrules":     int(5_000      * SCALE),  # 5K
+    "radial_monikers":     int(1_000_000  * SCALE),  # 1M
 }
-ROWS_RISK_DEFAULT = int(20_000_000 * SCALE)         # production: ~20M risk rows per table
+ROWS_RISK_DEFAULT = int(20_000_000 * SCALE)          # 20M per sensitivity table
 
 # Shared ID ranges — used across tables for FK consistency
 INSTRUMENT_ID_MIN, INSTRUMENT_ID_MAX = 60_000_000, 310_000_000
@@ -198,9 +200,6 @@ def build_spec_from_sample(spark, table_name, sample_df, target_rows, partitions
 
 CORE_TABLES = {
     "book_universe", "instrument", "position", "package_composition",
-    "position_risk_greeks_assetlevel",
-    "position_risk_greeks_currency",
-    "position_risk_greeks_instrumentlevel",
 }
 
 FK_COLUMN_RANGES = {
@@ -244,19 +243,6 @@ def get_fk_overrides(table_name, schema):
                 "random": True,
             }
 
-    # Override Sensitivity_Value with a symmetric range for risk tables.
-    # Real trading books have a mix of long (positive) and short (negative)
-    # exposures — the sample data was skewed entirely negative.
-    RISK_TABLES = {
-        "position_risk_greeks_assetlevel",
-        "position_risk_greeks_currency",
-        "position_risk_greeks_instrumentlevel",
-    }
-    if table_name in RISK_TABLES and "Sensitivity_Value" in fields:
-        overrides["Sensitivity_Value"] = {
-            "minValue": -10_000_000.0, "maxValue": 10_000_000.0, "random": True,
-        }
-
     # Override book hierarchy columns with realistic global locations
     if table_name == "book_universe":
         if "Book_Location_Code" in fields:
@@ -279,20 +265,26 @@ def get_fk_overrides(table_name, schema):
 
 # COMMAND ----------
 
+# position_risk_greeks_* are excluded — derived via join in Step 3b
 GENERATION_ORDER = [
     "book_universe", "instrument", "radial_instrument", "fx_rates",
     "position", "package_composition",
-    "position_risk_greeks_assetlevel", "position_risk_greeks_currency",
-    "position_risk_greeks_instrumentlevel",
     "radial_arbrules", "radial_monikers",
     "radial_pnl_sensitivity_commodities",
+    # Unit sensitivities — must be generated before position risk greeks
     "radial_unit_sensitivities_asset_greeks",
     "radial_unit_sensitivities_asset_greeks_fully_decomposed",
     "radial_unit_sensitivities_instruments_greeks",
 ]
 
+RISK_GREEKS_TABLES = {
+    "position_risk_greeks_assetlevel",
+    "position_risk_greeks_currency",
+    "position_risk_greeks_instrumentlevel",
+}
+
 ordered_names = [n for n in GENERATION_ORDER if n in samples]
-extras = [n for n in samples if n not in ordered_names]
+extras = [n for n in samples if n not in ordered_names and n not in RISK_GREEKS_TABLES]
 ordered_names.extend(extras)
 
 results = {}
@@ -315,20 +307,6 @@ for table_name in ordered_names:
                                   target_rows, PARTITIONS, overrides)
     gen_df = spec.build()
 
-    # Add Business_Date to risk tables — simulates daily risk calculation snapshots.
-    # In a real RADIAL system, each row is one day's risk computation for a position.
-    RISK_TABLES_WITH_DATE = {
-        "position_risk_greeks_assetlevel",
-        "position_risk_greeks_currency",
-        "position_risk_greeks_instrumentlevel",
-    }
-    if table_name in RISK_TABLES_WITH_DATE:
-        total_days = YEARS * 365
-        gen_df = gen_df.withColumn(
-            "Business_Date",
-            F.date_add(F.lit(DATE_BEGIN), (F.rand(seed=42) * total_days).cast("int"))
-        )
-
     elapsed = (datetime.now() - start).total_seconds()
 
     results[table_name] = {
@@ -339,6 +317,102 @@ for table_name in ordered_names:
         "sample_rows": sample_df.count(),
     }
     print(f"  Generated {results[table_name]['rows']:,} rows in {elapsed:.1f}s")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Step 3b: Derive Position Risk Greeks via Join
+# MAGIC
+# MAGIC Position risk greeks are not generated independently — they are the join product of
+# MAGIC the position table and the corresponding unit sensitivity tables. Each position gets
+# MAGIC one risk row per sensitivity type, matching real RADIAL risk table cardinality.
+
+# COMMAND ----------
+
+RISK_GREEKS_JOIN_MAP = {
+    "position_risk_greeks_assetlevel":     "radial_unit_sensitivities_asset_greeks",
+    "position_risk_greeks_currency":        "radial_unit_sensitivities_asset_greeks_fully_decomposed",
+    "position_risk_greeks_instrumentlevel": "radial_unit_sensitivities_instruments_greeks",
+}
+
+
+def build_risk_greeks_via_join(spark, risk_table, position_df, unit_sens_df,
+                                sample_df, target_rows, date_begin, years):
+    """Derive a position_risk_greeks table by cross-joining positions with the
+    distinct sensitivity types from the corresponding unit_sensitivities table.
+    Each position gets one row per sensitivity type, so row count ≈
+    position_count × sensitivity_type_count. Positions are sampled to hit target_rows.
+    """
+    if "Sensitivity_Type" not in unit_sens_df.columns:
+        print(f"  Warning: {risk_table} — unit sensitivities table has no Sensitivity_Type column, skipping")
+        return None
+
+    sens_types_df = unit_sens_df.select("Sensitivity_Type").distinct().cache()
+    n_sens_types  = sens_types_df.count()
+
+    n_positions  = position_df.count()
+    pos_target   = max(1, target_rows // max(1, n_sens_types))
+    pos_fraction = min(1.0, pos_target / n_positions)
+
+    print(f"  {risk_table}: {n_positions:,} positions × {n_sens_types} sensitivity types "
+          f"→ target {target_rows:,} rows (sampling {pos_fraction:.1%} of positions)")
+
+    base = (position_df.sample(fraction=pos_fraction, seed=42)
+                       .crossJoin(sens_types_df))
+
+    # Synthetic Sensitivity_Value — symmetric range reflecting real long/short exposures
+    base = base.withColumn(
+        "Sensitivity_Value",
+        (F.rand(seed=42) * 2 - 1) * F.lit(10_000_000.0)
+    )
+
+    # Business_Date — daily risk snapshot
+    total_days = years * 365
+    base = base.withColumn(
+        "Business_Date",
+        F.date_add(F.lit(date_begin), (F.rand(seed=42) * total_days).cast("int"))
+    )
+
+    # Select columns matching the target schema; fill any missing with nulls
+    target_fields = sample_df.schema.fields
+    result = base.select([c for c in [f.name for f in target_fields] if c in base.columns])
+    for field in target_fields:
+        if field.name not in result.columns:
+            result = result.withColumn(field.name, F.lit(None).cast(field.dataType))
+
+    return result.select([f.name for f in target_fields])
+
+
+for risk_table, unit_sens_table in RISK_GREEKS_JOIN_MAP.items():
+    if risk_table not in samples:
+        print(f"  Skipping {risk_table} — no sample file found")
+        continue
+    if unit_sens_table not in results:
+        print(f"  Skipping {risk_table} — {unit_sens_table} was not generated")
+        continue
+
+    start = datetime.now()
+    df = build_risk_greeks_via_join(
+        spark, risk_table,
+        position_df=results["position"]["df"],
+        unit_sens_df=results[unit_sens_table]["df"],
+        sample_df=samples[risk_table],
+        target_rows=ROWS_RISK_DEFAULT,
+        date_begin=DATE_BEGIN,
+        years=YEARS,
+    )
+    if df is None:
+        continue
+
+    elapsed = (datetime.now() - start).total_seconds()
+    results[risk_table] = {
+        "df": df,
+        "rows": df.count(),
+        "cols": len(df.columns),
+        "elapsed": elapsed,
+        "sample_rows": samples[risk_table].count(),
+    }
+    print(f"  Generated {results[risk_table]['rows']:,} rows in {elapsed:.1f}s")
 
 # COMMAND ----------
 
