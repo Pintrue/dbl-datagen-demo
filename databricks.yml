@@ -46,11 +46,6 @@ targets:
       scale: "0.1"
       years: "1"
     resources:
-      schemas:
-        dev_schema:
-          name: ${var.schema}
-          catalog_name: ${var.catalog}
-          comment: "Atlas RADIAL dev dataset — scale=0.1, ~2M risk rows"
       jobs:
         atlas_radial_data_generation:
           name: "[dev] Atlas RADIAL - Data Generation"
