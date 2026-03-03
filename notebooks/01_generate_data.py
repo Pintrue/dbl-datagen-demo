@@ -375,12 +375,22 @@ def build_risk_greeks_via_join(spark, risk_table, position_df, unit_sens_df,
 
     # Select columns matching the target schema; fill any missing with nulls
     target_fields = sample_df.schema.fields
-    result = base.select([c for c in [f.name for f in target_fields] if c in base.columns])
+    target_col_names = [f.name for f in target_fields]
+    result = base.select([c for c in target_col_names if c in base.columns])
     for field in target_fields:
         if field.name not in result.columns:
             result = result.withColumn(field.name, F.lit(None).cast(field.dataType))
 
-    return result.select([f.name for f in target_fields])
+    # Business_Date is not in the sample schema (it was added synthetically in the original
+    # pipeline) but is required by the gold_risk_exposure_monthly view. Always append it.
+    if "Business_Date" not in target_col_names:
+        result = result.withColumn(
+            "Business_Date",
+            F.date_add(F.lit(date_begin), (F.rand(seed=42) * total_days).cast("int"))
+        )
+        target_col_names = target_col_names + ["Business_Date"]
+
+    return result.select(target_col_names)
 
 
 for risk_table, unit_sens_table in RISK_GREEKS_JOIN_MAP.items():
