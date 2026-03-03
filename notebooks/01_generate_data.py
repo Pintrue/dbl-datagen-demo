@@ -75,11 +75,17 @@ ROW_TARGETS = {
 }
 ROWS_RISK_DEFAULT = int(20_000_000 * SCALE)          # 20M per sensitivity table
 
-# Shared ID ranges — used across tables for FK consistency
-INSTRUMENT_ID_MIN, INSTRUMENT_ID_MAX = 60_000_000, 310_000_000
-FOLDER_ID_MIN,     FOLDER_ID_MAX     = 5_000, 3_500_000
-POSITION_ID_MIN,   POSITION_ID_MAX   = 10_000_000, 40_000_000
-BOOK_ID_MIN,       BOOK_ID_MAX       = 5_000, 3_500_000
+# ID ranges — sized to match row counts so FK joins produce meaningful overlap.
+# Range width ≈ row count means each ID appears ~1 time on average, giving
+# ~1 match per join row and the right cardinality for derived tables.
+INSTRUMENT_ID_MIN = 60_000_000
+INSTRUMENT_ID_MAX = INSTRUMENT_ID_MIN + ROW_TARGETS["instrument"]
+FOLDER_ID_MIN     = 5_000
+FOLDER_ID_MAX     = FOLDER_ID_MIN  + ROW_TARGETS["book_universe"]
+POSITION_ID_MIN   = 10_000_000
+POSITION_ID_MAX   = POSITION_ID_MIN + ROW_TARGETS["position"]
+BOOK_ID_MIN       = FOLDER_ID_MIN
+BOOK_ID_MAX       = FOLDER_ID_MAX
 
 # COMMAND ----------
 
@@ -202,11 +208,21 @@ CORE_TABLES = {
     "book_universe", "instrument", "position", "package_composition",
 }
 
+# Sensitivity tables whose Parent_Instrument_Id / Position_Id FKs must be pinned
+# to the same ID ranges as their parent tables.
+SENSITIVITY_TABLES = {
+    "radial_unit_sensitivities_asset_greeks",
+    "radial_unit_sensitivities_asset_greeks_fully_decomposed",
+    "radial_unit_sensitivities_instruments_greeks",
+    "radial_pnl_sensitivity_commodities",
+}
+
 FK_COLUMN_RANGES = {
     "Instrument_Id":        (INSTRUMENT_ID_MIN, INSTRUMENT_ID_MAX),
     "Parent_Instrument_Id": (INSTRUMENT_ID_MIN, INSTRUMENT_ID_MAX),
     "Folder_Id":            (FOLDER_ID_MIN, FOLDER_ID_MAX),
     "Book_Id":              (BOOK_ID_MIN, BOOK_ID_MAX),
+    "Position_Id":          (POSITION_ID_MIN, POSITION_ID_MAX),
 }
 
 
@@ -225,7 +241,7 @@ TRADING_AREAS = [
 
 
 def get_fk_overrides(table_name, schema):
-    if table_name not in CORE_TABLES:
+    if table_name not in CORE_TABLES and table_name not in SENSITIVITY_TABLES:
         return {}
 
     overrides = {}
@@ -293,6 +309,16 @@ for table_name in ordered_names:
     sample_df = samples[table_name]
     target_rows = ROW_TARGETS.get(table_name, ROWS_RISK_DEFAULT)
 
+    # Some sensitivity sample files store FK columns as STRING — cast to LongType
+    # so that dbldatagen can apply numeric range overrides for FK consistency.
+    if table_name in SENSITIVITY_TABLES:
+        for _fk_col in ("Parent_Instrument_Id", "Position_Id"):
+            if _fk_col in sample_df.columns and isinstance(
+                sample_df.schema[_fk_col].dataType, StringType
+            ):
+                sample_df = sample_df.withColumn(_fk_col, F.col(_fk_col).cast(LongType()))
+                print(f"  Pre-cast {_fk_col} STRING→LongType in {table_name}")
+
     overrides = get_fk_overrides(table_name, sample_df.schema)
     override_info = f"  FK overrides: {list(overrides.keys())}" if overrides else ""
 
@@ -338,59 +364,88 @@ RISK_GREEKS_JOIN_MAP = {
 
 def build_risk_greeks_via_join(spark, risk_table, position_df, unit_sens_df,
                                 sample_df, target_rows, date_begin, years):
-    """Derive a position_risk_greeks table by cross-joining positions with the
-    distinct sensitivity types from the corresponding unit_sensitivities table.
-    Each position gets one row per sensitivity type, so row count ≈
-    position_count × sensitivity_type_count. Positions are sampled to hit target_rows.
+    """Derive a position_risk_greeks table by equi-joining positions with unit_sensitivities
+    on position.Instrument_Id = unit_sens.Parent_Instrument_Id (and optionally
+    Instrument_Id_Type = Parent_Instrument_Id_Type when both columns exist).
+
+    Sensitivity_Value flows from unit_sensitivities, preserving the real RADIAL FK
+    relationship. unit_sensitivities is deduplicated to one row per
+    (instrument, sensitivity_type) before the join to prevent fan-out.
     """
-    if "Sensitivity_Type" not in unit_sens_df.columns:
-        print(f"  Warning: {risk_table} — unit sensitivities table has no Sensitivity_Type column, skipping")
+    required = ("Parent_Instrument_Id", "Sensitivity_Type", "Sensitivity_Value")
+    missing = [c for c in required if c not in unit_sens_df.columns]
+    if missing:
+        print(f"  Warning: {risk_table} — unit_sens missing {missing}, skipping")
         return None
 
-    sens_types_df = unit_sens_df.select("Sensitivity_Type").distinct()
-    n_sens_types  = sens_types_df.count()
+    total_days = years * 365
 
-    n_positions  = position_df.count()
-    pos_target   = max(1, target_rows // max(1, n_sens_types))
-    pos_fraction = min(1.0, pos_target / n_positions)
-
-    print(f"  {risk_table}: {n_positions:,} positions × {n_sens_types} sensitivity types "
-          f"→ target {target_rows:,} rows (sampling {pos_fraction:.1%} of positions)")
-
-    base = (position_df.sample(fraction=pos_fraction, seed=42)
-                       .crossJoin(sens_types_df))
-
-    # Synthetic Sensitivity_Value — symmetric range reflecting real long/short exposures
-    base = base.withColumn(
-        "Sensitivity_Value",
-        (F.rand(seed=42) * 2 - 1) * F.lit(10_000_000.0)
+    # Include type column in the join key when both tables have the matching columns.
+    use_type_join = (
+        "Parent_Instrument_Id_Type" in unit_sens_df.columns
+        and "Instrument_Id_Type" in position_df.columns
     )
 
-    # Business_Date — daily risk snapshot
-    total_days = years * 365
-    base = base.withColumn(
+    # Deduplicate unit_sens: one row per (instrument [, type], sensitivity_type)
+    # This gives exactly one Sensitivity_Value per instrument+type combination and
+    # avoids a fan-out explosion on the join.
+    dedup_keys = ["Parent_Instrument_Id", "Sensitivity_Type"]
+    unit_cols  = ["Parent_Instrument_Id", "Sensitivity_Type", "Sensitivity_Value"]
+    if use_type_join:
+        dedup_keys = ["Parent_Instrument_Id", "Parent_Instrument_Id_Type", "Sensitivity_Type"]
+        unit_cols  = ["Parent_Instrument_Id", "Parent_Instrument_Id_Type",
+                      "Sensitivity_Type", "Sensitivity_Value"]
+
+    unit_sens_slim = unit_sens_df.dropDuplicates(dedup_keys).select(unit_cols)
+
+    # Build explicit join condition so both sides' columns are retained.
+    # position has no column named Parent_Instrument_Id, so there is no ambiguity.
+    if use_type_join:
+        join_cond = (
+            (position_df["Instrument_Id"] == unit_sens_slim["Parent_Instrument_Id"]) &
+            (position_df["Instrument_Id_Type"] == unit_sens_slim["Parent_Instrument_Id_Type"])
+        )
+    else:
+        join_cond = position_df["Instrument_Id"] == unit_sens_slim["Parent_Instrument_Id"]
+
+    joined = position_df.join(unit_sens_slim, on=join_cond, how="inner")
+
+    # Drop the FK columns from unit_sens side (equal to position's Instrument_Id/Type)
+    # then re-expose them under the Parent_* names expected by the target schema.
+    joined = joined.drop("Parent_Instrument_Id")
+    joined = joined.withColumn("Parent_Instrument_Id", F.col("Instrument_Id"))
+    if use_type_join:
+        joined = joined.drop("Parent_Instrument_Id_Type")
+        joined = joined.withColumn("Parent_Instrument_Id_Type", F.col("Instrument_Id_Type"))
+
+    # Add Business_Date — daily risk snapshot
+    joined = joined.withColumn(
         "Business_Date",
         F.date_add(F.lit(date_begin), (F.rand(seed=42) * total_days).cast("int"))
     )
 
-    # Select columns matching the target schema; fill any missing with nulls
-    target_fields = sample_df.schema.fields
+    # Map to target schema: select matching columns, fill any missing with null
+    target_fields    = sample_df.schema.fields
     target_col_names = [f.name for f in target_fields]
-    result = base.select([c for c in target_col_names if c in base.columns])
-    for field in target_fields:
-        if field.name not in result.columns:
-            result = result.withColumn(field.name, F.lit(None).cast(field.dataType))
 
-    # Business_Date is not in the sample schema (it was added synthetically in the original
-    # pipeline) but is required by the gold_risk_exposure_monthly view. Always append it.
+    for field in target_fields:
+        if field.name not in joined.columns:
+            joined = joined.withColumn(field.name, F.lit(None).cast(field.dataType))
+
+    result = joined.select(target_col_names)
+
+    # Business_Date is synthetic (not in sample schema) but required by gold views.
     if "Business_Date" not in target_col_names:
         result = result.withColumn(
             "Business_Date",
             F.date_add(F.lit(date_begin), (F.rand(seed=42) * total_days).cast("int"))
         )
         target_col_names = target_col_names + ["Business_Date"]
+        result = result.select(target_col_names)
 
-    return result.select(target_col_names)
+    actual = result.count()
+    print(f"  {risk_table}: equi-join → {actual:,} rows (target {target_rows:,})")
+    return result
 
 
 for risk_table, unit_sens_table in RISK_GREEKS_JOIN_MAP.items():
