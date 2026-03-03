@@ -347,7 +347,7 @@ def build_risk_greeks_via_join(spark, risk_table, position_df, unit_sens_df,
         print(f"  Warning: {risk_table} — unit sensitivities table has no Sensitivity_Type column, skipping")
         return None
 
-    sens_types_df = unit_sens_df.select("Sensitivity_Type").distinct().cache()
+    sens_types_df = unit_sens_df.select("Sensitivity_Type").distinct()
     n_sens_types  = sens_types_df.count()
 
     n_positions  = position_df.count()
