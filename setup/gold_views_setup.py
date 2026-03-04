@@ -286,10 +286,100 @@ print("Created: gold_fx_rates_timeseries")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## Silver Table: Flattened Book Hierarchy
+# MAGIC
+# MAGIC Splits `SDS_Book_Path` into 11 named level columns so analysts can group,
+# MAGIC filter and aggregate positions at any node of the book family tree without
+# MAGIC needing to write string-splitting logic in every query.
+
+# COMMAND ----------
+
+spark.sql(f"""
+CREATE OR REPLACE TABLE {CATALOG}.{SCHEMA}.silver_book_hierarchy_flat AS
+SELECT
+    Folder_Id,
+    Book_Id,
+    Book_Location_Code,
+    Desk_Code,
+    Trading_Area_Name,
+    SDS_Book_Path,
+    SPLIT(SDS_Book_Path, ':')[0]  AS book_level_1,
+    SPLIT(SDS_Book_Path, ':')[1]  AS book_level_2,
+    SPLIT(SDS_Book_Path, ':')[2]  AS book_level_3,
+    SPLIT(SDS_Book_Path, ':')[3]  AS book_level_4,
+    SPLIT(SDS_Book_Path, ':')[4]  AS book_level_5,
+    SPLIT(SDS_Book_Path, ':')[5]  AS book_level_6,
+    SPLIT(SDS_Book_Path, ':')[6]  AS book_level_7,
+    SPLIT(SDS_Book_Path, ':')[7]  AS book_level_8,
+    SPLIT(SDS_Book_Path, ':')[8]  AS book_level_9,
+    SPLIT(SDS_Book_Path, ':')[9]  AS book_level_10,
+    SPLIT(SDS_Book_Path, ':')[10] AS book_level_11
+FROM {CATALOG}.{SCHEMA}.book_universe
+""")
+print("Created: silver_book_hierarchy_flat")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Gold View 13: Position Summary by Book Level
+
+# COMMAND ----------
+
+spark.sql(f"""
+CREATE OR REPLACE VIEW {CATALOG}.{SCHEMA}.gold_position_by_book_level AS
+SELECT
+    b.book_level_1,
+    b.book_level_2,
+    b.book_level_3,
+    b.book_level_4,
+    COUNT(*)                          AS position_count,
+    ROUND(SUM(p.Position_Qty), 2)     AS total_quantity
+FROM {CATALOG}.{SCHEMA}.position p
+JOIN {CATALOG}.{SCHEMA}.silver_book_hierarchy_flat b ON p.Folder_Id = b.Folder_Id
+GROUP BY b.book_level_1, b.book_level_2, b.book_level_3, b.book_level_4
+ORDER BY position_count DESC
+""")
+print("Created: gold_position_by_book_level")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Gold View 14: Monthly Position Exposure by Book Level (Time Series)
+
+# COMMAND ----------
+
+spark.sql(f"""
+CREATE OR REPLACE VIEW {CATALOG}.{SCHEMA}.gold_position_book_level_monthly AS
+SELECT
+    DATE_TRUNC('MONTH', r.Business_Date)   AS Business_Month,
+    b.book_level_1,
+    b.book_level_2,
+    b.book_level_3,
+    COUNT(*)                               AS record_count,
+    ROUND(SUM(r.Sensitivity_Value), 2)     AS total_exposure
+FROM {CATALOG}.{SCHEMA}.position_risk_greeks_assetlevel r
+JOIN {CATALOG}.{SCHEMA}.position p
+    ON r.Parent_Instrument_Id = p.Instrument_Id
+JOIN {CATALOG}.{SCHEMA}.silver_book_hierarchy_flat b
+    ON p.Folder_Id = b.Folder_Id
+WHERE r.Sensitivity_Type = 'Delta'
+GROUP BY
+    DATE_TRUNC('MONTH', r.Business_Date),
+    b.book_level_1, b.book_level_2, b.book_level_3
+ORDER BY Business_Month
+""")
+print("Created: gold_position_book_level_monthly")
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## Summary
 
 # COMMAND ----------
 
+silver_tables = [
+    "silver_book_hierarchy_flat",
+]
 gold_views = [
     "gold_position_by_currency",
     "gold_book_hierarchy",
@@ -303,11 +393,16 @@ gold_views = [
     "gold_package_composition",
     "gold_risk_exposure_monthly",
     "gold_fx_rates_timeseries",
+    "gold_position_by_book_level",
+    "gold_position_book_level_monthly",
 ]
 
 print(f"\n{'='*60}")
-print(f"Gold views created in {CATALOG}.{SCHEMA}:")
+print(f"Silver tables created in {CATALOG}.{SCHEMA}:")
+for t in silver_tables:
+    print(f"  - {t}")
+print(f"\nGold views created in {CATALOG}.{SCHEMA}:")
 for v in gold_views:
     print(f"  - {v}")
-print(f"\nTotal: {len(gold_views)} views ready for Genie and AI/BI Dashboard")
+print(f"\nTotal: {len(silver_tables)} silver tables + {len(gold_views)} gold views")
 print(f"{'='*60}")

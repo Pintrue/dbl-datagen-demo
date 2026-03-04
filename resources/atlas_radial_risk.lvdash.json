@@ -69,6 +69,20 @@
       "queryLines": [
         "SELECT * FROM <YOUR_CATALOG>.<YOUR_SCHEMA>.gold_fx_rates_timeseries ORDER BY Business_Month"
       ]
+    },
+    {
+      "name": "ds_pos_book_level",
+      "displayName": "Position by Book Level",
+      "queryLines": [
+        "SELECT * FROM <YOUR_CATALOG>.<YOUR_SCHEMA>.gold_position_by_book_level"
+      ]
+    },
+    {
+      "name": "ds_pos_book_monthly",
+      "displayName": "Position Book Level Monthly",
+      "queryLines": [
+        "SELECT * FROM <YOUR_CATALOG>.<YOUR_SCHEMA>.gold_position_book_level_monthly ORDER BY Business_Month"
+      ]
     }
   ],
   "pages": [
@@ -1364,6 +1378,313 @@
             "y": 17,
             "width": 6,
             "height": 6
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
+    },
+    {
+      "name": "f9a2b3c4",
+      "displayName": "Position by Book Hierarchy",
+      "layout": [
+        {
+          "widget": {
+            "name": "a3b1c2d4",
+            "queries": [
+              {
+                "name": "filter_a3b1c2d4_book_level_1",
+                "query": {
+                  "datasetName": "ds_pos_book_level",
+                  "fields": [
+                    {
+                      "name": "book_level_1",
+                      "expression": "`book_level_1`"
+                    },
+                    {
+                      "name": "book_level_1_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "book_level_1",
+                    "displayName": "Group Entity",
+                    "queryName": "filter_a3b1c2d4_book_level_1"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Group Entity (Level 1)"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "b5c2d3e5",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_pos_book_level",
+                  "fields": [
+                    {
+                      "name": "book_level_3",
+                      "expression": "`book_level_3`"
+                    },
+                    {
+                      "name": "sum(position_count)",
+                      "expression": "SUM(`position_count`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "book_level_3",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  },
+                  "displayName": "Asset Class"
+                },
+                "y": {
+                  "fieldName": "sum(position_count)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Position Count"
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Positions by Asset Class (Level 3)"
+              },
+              "mark": {
+                "colors": [
+                  "#FFAB00",
+                  "#00A972",
+                  "#FF3621",
+                  "#8BCAE7",
+                  "#AB4057",
+                  "#99DDB4"
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 4,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "c7d4e5f6",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_pos_book_level",
+                  "fields": [
+                    {
+                      "name": "sum(position_count)",
+                      "expression": "SUM(`position_count`)"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(position_count)",
+                  "displayName": "Total Positions"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Total Positions"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 3,
+            "width": 2,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "d9e6f7a8",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_pos_book_level",
+                  "fields": [
+                    {
+                      "name": "book_level_4",
+                      "expression": "`book_level_4`"
+                    },
+                    {
+                      "name": "sum(position_count)",
+                      "expression": "SUM(`position_count`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "book_level_4",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  },
+                  "displayName": "Business Area"
+                },
+                "y": {
+                  "fieldName": "sum(position_count)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Position Count"
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Positions by Business Area (Level 4)"
+              },
+              "mark": {
+                "colors": [
+                  "#FFAB00",
+                  "#00A972",
+                  "#FF3621",
+                  "#8BCAE7",
+                  "#AB4057",
+                  "#99DDB4",
+                  "#FCA4A1"
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 7,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "e2f8a9b1",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_pos_book_monthly",
+                  "fields": [
+                    {
+                      "name": "Business_Month",
+                      "expression": "`Business_Month`"
+                    },
+                    {
+                      "name": "book_level_2",
+                      "expression": "`book_level_2`"
+                    },
+                    {
+                      "name": "total_exposure",
+                      "expression": "SUM(`total_exposure`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "Business_Month",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Month"
+                },
+                "y": {
+                  "fieldName": "total_exposure",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Delta Exposure"
+                },
+                "color": {
+                  "fieldName": "book_level_2",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Division"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Monthly Delta Exposure by Division (Level 2)"
+              },
+              "mark": {
+                "colors": [
+                  "#FF3621",
+                  "#FFAB00",
+                  "#00A972"
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 13,
+            "width": 6,
+            "height": 7
           }
         }
       ],

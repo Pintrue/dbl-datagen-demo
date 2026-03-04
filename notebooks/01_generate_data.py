@@ -239,6 +239,33 @@ TRADING_AREAS = [
     "Structured Products", "Emerging Markets",
 ]
 
+# 11-level book path hierarchy for SDS_Book_Path generation.
+# Each list must have ≥3 values so every level has sufficient enumeration for
+# drill-down analysis. Level 11 (leaf) is derived from Folder_Id for uniqueness.
+BOOK_PATH_LEVELS = [
+    # L1  — Group entity
+    ["Barclays Group", "BCSL Holdings", "Barclays International"],
+    # L2  — Division
+    ["Markets", "Banking", "Corporate"],
+    # L3  — Asset Class
+    ["Equities", "Fixed Income", "FX & Rates", "Commodities", "Multi-Asset"],
+    # L4  — Business Area
+    ["Flow Trading", "Prime Services", "Derivatives", "Origination", "Macro Rates"],
+    # L5  — Sub-Business
+    ["Delta One", "Cash Products", "Options & Exotics", "Credit Trading", "Rates Swaps"],
+    # L6  — Region
+    ["EMEA", "Americas", "Asia Pacific"],
+    # L7  — Sub-Region
+    ["UK", "Continental Europe", "North America", "Japan", "SE Asia"],
+    # L8  — Legal Entity
+    ["BBPLC", "BSAG", "BNAC", "BBIL"],
+    # L9  — Book Group
+    ["Active Books", "Legacy Portfolio", "Run-Off"],
+    # L10 — Book Sub-Group
+    ["In-Scope", "Out-of-Scope", "Regulatory Capital"],
+    # L11 leaf: f"BK-{Folder_Id}" — unique per book (synthesised in _add_book_path)
+]
+
 
 def get_fk_overrides(table_name, schema):
     if table_name not in CORE_TABLES and table_name not in SENSITIVITY_TABLES:
@@ -273,6 +300,40 @@ def get_fk_overrides(table_name, schema):
         overrides["Location_Code"] = {"values": GLOBAL_LOCATIONS, "random": True}
 
     return overrides
+
+
+def _add_book_path(df):
+    """Replace SDS_Book_Path with a structured 11-level colon-separated hierarchy.
+
+    Levels 1-10 are drawn from BOOK_PATH_LEVELS using a per-level hash of Folder_Id
+    so that:
+    - Assignment is deterministic and reproducible across runs
+    - Values distribute evenly, ensuring each level has ≥3 distinct enumerations
+    Level 11 is a unique leaf derived from Folder_Id (e.g. 'BK-550734').
+    """
+    result = df
+    path_parts = []
+
+    for i, values in enumerate(BOOK_PATH_LEVELS):
+        _col = f"_bp_{i}"
+        n    = len(values)
+        arr  = F.array([F.lit(v) for v in values])
+        # Hash of (string(Folder_Id), "|", level_index) → stable, even distribution
+        idx  = (
+            F.abs(F.hash(F.concat(F.col("Folder_Id").cast("string"), F.lit(f"|{i}"))))
+            % n
+        ).cast(IntegerType())
+        result = result.withColumn(_col, arr.getItem(idx))
+        path_parts.append(F.col(_col))
+
+    # Level 11: unique leaf from Folder_Id
+    path_parts.append(F.concat(F.lit("BK-"), F.col("Folder_Id").cast("string")))
+
+    result = result.withColumn("SDS_Book_Path", F.concat_ws(":", *path_parts))
+    for i in range(len(BOOK_PATH_LEVELS)):
+        result = result.drop(f"_bp_{i}")
+
+    return result
 
 # COMMAND ----------
 
@@ -332,6 +393,11 @@ for table_name in ordered_names:
     spec = build_spec_from_sample(spark, table_name, sample_df,
                                   target_rows, PARTITIONS, overrides)
     gen_df = spec.build()
+
+    # Post-process: replace SDS_Book_Path with a structured 11-level hierarchy so
+    # the silver flat table has meaningful drill-down granularity at every level.
+    if table_name == "book_universe":
+        gen_df = _add_book_path(gen_df)
 
     elapsed = (datetime.now() - start).total_seconds()
 
