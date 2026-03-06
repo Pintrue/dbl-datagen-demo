@@ -399,24 +399,63 @@ for table_name in ordered_names:
     if table_name == "book_universe":
         gen_df = _add_book_path(gen_df)
 
-    # Expand position to a monthly time-series by cross-joining with a date spine.
-    # Each position is replicated once per calendar month in [DATE_BEGIN, DATE_END],
-    # giving ~base_rows × n_months rows (e.g. 750K × 120 months = ~90M at scale=1.0).
-    # This makes Business_Date available on position for time-series analysis without
-    # going through the risk_greeks tables.
+    # Expand position to a realistic monthly time-series with position turnover.
+    # Each position is assigned a start month and duration (1-24 months) derived
+    # from its Position_Id hash, so the portfolio composition changes each month.
+    # Positions that share an instrument carry that instrument's sensitivity through
+    # to risk_greeks, giving genuine time-variation in book-level risk exposure.
     if table_name == "position":
         month_spine = spark.sql(f"""
-            SELECT explode(sequence(
-                DATE_TRUNC('MONTH', DATE '{DATE_BEGIN}'),
-                DATE_TRUNC('MONTH', DATE '{DATE_END}'),
-                INTERVAL 1 MONTH
-            )) AS Business_Date
+            SELECT
+                explode(sequence(
+                    DATE_TRUNC('MONTH', DATE '{DATE_BEGIN}'),
+                    DATE_TRUNC('MONTH', DATE '{DATE_END}'),
+                    INTERVAL 1 MONTH
+                )) AS Business_Date
         """)
         n_months = month_spine.count()
+
+        # Index the spine so we can filter by position lifecycle
+        month_spine_idx = month_spine.withColumn(
+            "month_idx",
+            F.months_between(F.col("Business_Date"), F.lit(DATE_BEGIN)).cast(IntegerType())
+        )
+
+        # Assign each position a deterministic start month and duration
         base_rows = gen_df.count()
-        gen_df = gen_df.crossJoin(month_spine)
-        print(f"  Monthly expansion: {base_rows:,} positions × {n_months} months "
-              f"= {base_rows * n_months:,} rows")
+        gen_df = gen_df \
+            .withColumn(
+                "start_month_idx",
+                (F.abs(F.hash(F.col("Position_Id").cast("string"))) % n_months)
+                .cast(IntegerType())
+            ) \
+            .withColumn(
+                "duration_months",
+                # Range 1-24 months: most positions short-lived, some long-running
+                ((F.abs(F.hash(F.concat(
+                    F.col("Position_Id").cast("string"), F.lit("_dur")
+                ))) % 24) + 1).cast(IntegerType())
+            )
+
+        # Explode each position into its active months without a full cross-join
+        gen_df = gen_df \
+            .withColumn(
+                "active_month_indices",
+                F.expr(
+                    f"sequence(start_month_idx, "
+                    f"least(start_month_idx + duration_months - 1, {n_months - 1}))"
+                )
+            ) \
+            .select(
+                *[c for c in gen_df.columns
+                  if c not in ("start_month_idx", "duration_months")],
+                F.explode("active_month_indices").alias("month_idx")
+            ) \
+            .join(month_spine_idx, "month_idx") \
+            .drop("month_idx")
+
+        print(f"  Position turnover: {base_rows:,} base positions × avg ~12 months "
+              f"= {gen_df.count():,} rows across {n_months} monthly snapshots")
 
     elapsed = (datetime.now() - start).total_seconds()
 
@@ -448,7 +487,8 @@ RISK_GREEKS_JOIN_MAP = {
 
 
 def build_risk_greeks_via_join(spark, risk_table, position_df, unit_sens_df,
-                                sample_df, target_rows, date_begin, years):
+                                sample_df, target_rows, date_begin, years,
+                                sensitivity_multiplier_df=None):
     """Derive a position_risk_greeks table by equi-joining positions with unit_sensitivities
     on position.Instrument_Id = unit_sens.Parent_Instrument_Id (and optionally
     Instrument_Id_Type = Parent_Instrument_Id_Type when both columns exist).
@@ -503,15 +543,36 @@ def build_risk_greeks_via_join(spark, risk_table, position_df, unit_sens_df,
         joined = joined.drop("Parent_Instrument_Id_Type")
         joined = joined.withColumn("Parent_Instrument_Id_Type", F.col("Instrument_Id_Type"))
 
-    # Add Business_Date — daily risk snapshot
-    joined = joined.withColumn(
-        "Business_Date",
-        F.date_add(F.lit(date_begin), (F.rand(seed=42) * total_days).cast("int"))
-    )
+    # Apply time-varying sensitivity multiplier so risk exposure evolves realistically
+    # over time. Each instrument is bucketed and assigned a random-walk multiplier
+    # per month derived from a pre-computed lookup table.
+    if sensitivity_multiplier_df is not None:
+        n_buckets = sensitivity_multiplier_df.select("instrument_bucket").distinct().count()
+        joined = joined \
+            .withColumn(
+                "instrument_bucket",
+                (F.abs(F.hash(F.col("Instrument_Id").cast("string"))) % n_buckets)
+                .cast(IntegerType())
+            ) \
+            .withColumn(
+                "month_idx",
+                F.months_between(F.col("Business_Date"), F.lit(date_begin)).cast(IntegerType())
+            )
+        joined = joined.join(sensitivity_multiplier_df, on=["instrument_bucket", "month_idx"], how="left")
+        joined = joined \
+            .withColumn(
+                "Sensitivity_Value",
+                F.col("Sensitivity_Value") * F.coalesce(F.col("sensitivity_multiplier"), F.lit(1.0))
+            ) \
+            .drop("instrument_bucket", "month_idx", "sensitivity_multiplier")
 
-    # Map to target schema: select matching columns, fill any missing with null
+    # Map to target schema: select matching columns, fill any missing with null.
+    # Business_Date is inherited from position (monthly spine) — not in the RADIAL
+    # sample schema but preserved here so gold views can group by month correctly.
     target_fields    = sample_df.schema.fields
     target_col_names = [f.name for f in target_fields]
+    if "Business_Date" in joined.columns and "Business_Date" not in target_col_names:
+        target_col_names = target_col_names + ["Business_Date"]
 
     for field in target_fields:
         if field.name not in joined.columns:
@@ -519,19 +580,28 @@ def build_risk_greeks_via_join(spark, risk_table, position_df, unit_sens_df,
 
     result = joined.select(target_col_names)
 
-    # Business_Date is synthetic (not in sample schema) but required by gold views.
-    if "Business_Date" not in target_col_names:
-        result = result.withColumn(
-            "Business_Date",
-            F.date_add(F.lit(date_begin), (F.rand(seed=42) * total_days).cast("int"))
-        )
-        target_col_names = target_col_names + ["Business_Date"]
-        result = result.select(target_col_names)
-
     actual = result.count()
     print(f"  {risk_table}: equi-join → {actual:,} rows (target {target_rows:,})")
     return result
 
+
+# Build a sensitivity multiplier lookup table: (instrument_bucket, month_idx) → multiplier.
+# Each bucket follows an independent random walk so book-level risk exposure shows
+# genuine trends and vol over the 10-year history rather than a flat line.
+_n_months  = YEARS * 12
+_n_buckets = 200
+import numpy as _np
+_np.random.seed(42)
+_monthly_returns   = _np.random.normal(0, 0.06, (_n_buckets, _n_months))
+_cum_multipliers   = _np.cumprod(1 + _monthly_returns, axis=1)
+sensitivity_multiplier_df = spark.createDataFrame(
+    [
+        (int(b), int(m), float(_cum_multipliers[b, m]))
+        for b in range(_n_buckets)
+        for m in range(_n_months)
+    ],
+    schema="instrument_bucket INT, month_idx INT, sensitivity_multiplier DOUBLE"
+).cache()
 
 for risk_table, unit_sens_table in RISK_GREEKS_JOIN_MAP.items():
     if risk_table not in samples:
@@ -550,6 +620,7 @@ for risk_table, unit_sens_table in RISK_GREEKS_JOIN_MAP.items():
         target_rows=ROWS_RISK_DEFAULT,
         date_begin=DATE_BEGIN,
         years=YEARS,
+        sensitivity_multiplier_df=sensitivity_multiplier_df,
     )
     if df is None:
         continue
