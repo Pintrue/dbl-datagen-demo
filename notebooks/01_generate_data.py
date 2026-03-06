@@ -399,6 +399,25 @@ for table_name in ordered_names:
     if table_name == "book_universe":
         gen_df = _add_book_path(gen_df)
 
+    # Expand position to a monthly time-series by cross-joining with a date spine.
+    # Each position is replicated once per calendar month in [DATE_BEGIN, DATE_END],
+    # giving ~base_rows × n_months rows (e.g. 750K × 120 months = ~90M at scale=1.0).
+    # This makes Business_Date available on position for time-series analysis without
+    # going through the risk_greeks tables.
+    if table_name == "position":
+        month_spine = spark.sql(f"""
+            SELECT explode(sequence(
+                DATE_TRUNC('MONTH', DATE '{DATE_BEGIN}'),
+                DATE_TRUNC('MONTH', DATE '{DATE_END}'),
+                INTERVAL 1 MONTH
+            )) AS Business_Date
+        """)
+        n_months = month_spine.count()
+        base_rows = gen_df.count()
+        gen_df = gen_df.crossJoin(month_spine)
+        print(f"  Monthly expansion: {base_rows:,} positions × {n_months} months "
+              f"= {base_rows * n_months:,} rows")
+
     elapsed = (datetime.now() - start).total_seconds()
 
     results[table_name] = {

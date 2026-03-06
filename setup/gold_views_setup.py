@@ -336,6 +336,7 @@ SELECT
     ROUND(SUM(p.Position_Qty), 2)     AS total_quantity
 FROM {CATALOG}.{SCHEMA}.position p
 JOIN {CATALOG}.{SCHEMA}.silver_book_hierarchy_flat b ON p.Folder_Id = b.Folder_Id
+WHERE p.Business_Date = (SELECT MAX(Business_Date) FROM {CATALOG}.{SCHEMA}.position)
 GROUP BY b.book_level_1, b.book_level_2, b.book_level_3, b.book_level_4
 ORDER BY position_count DESC
 """)
@@ -351,20 +352,17 @@ print("Created: gold_position_by_book_level")
 spark.sql(f"""
 CREATE OR REPLACE VIEW {CATALOG}.{SCHEMA}.gold_position_book_level_monthly AS
 SELECT
-    DATE_TRUNC('MONTH', r.Business_Date)   AS Business_Month,
+    p.Business_Date                        AS Business_Month,
     b.book_level_1,
     b.book_level_2,
     b.book_level_3,
-    COUNT(*)                               AS record_count,
-    ROUND(SUM(r.Sensitivity_Value), 2)     AS total_exposure
-FROM {CATALOG}.{SCHEMA}.position_risk_greeks_assetlevel r
-JOIN {CATALOG}.{SCHEMA}.position p
-    ON r.Parent_Instrument_Id = p.Instrument_Id
+    COUNT(*)                               AS position_count,
+    ROUND(SUM(p.Position_Qty), 2)          AS total_quantity
+FROM {CATALOG}.{SCHEMA}.position p
 JOIN {CATALOG}.{SCHEMA}.silver_book_hierarchy_flat b
     ON p.Folder_Id = b.Folder_Id
-WHERE r.Sensitivity_Type = 'Delta'
 GROUP BY
-    DATE_TRUNC('MONTH', r.Business_Date),
+    p.Business_Date,
     b.book_level_1, b.book_level_2, b.book_level_3
 ORDER BY Business_Month
 """)

@@ -1633,8 +1633,8 @@
                       "expression": "`book_level_2`"
                     },
                     {
-                      "name": "total_exposure",
-                      "expression": "SUM(`total_exposure`)"
+                      "name": "position_count",
+                      "expression": "SUM(`position_count`)"
                     }
                   ],
                   "disaggregated": false
@@ -1653,11 +1653,11 @@
                   "displayName": "Month"
                 },
                 "y": {
-                  "fieldName": "total_exposure",
+                  "fieldName": "position_count",
                   "scale": {
                     "type": "quantitative"
                   },
-                  "displayName": "Delta Exposure"
+                  "displayName": "Position Count"
                 },
                 "color": {
                   "fieldName": "book_level_2",
@@ -1669,7 +1669,7 @@
               },
               "frame": {
                 "showTitle": true,
-                "title": "Monthly Delta Exposure by Division (Level 2)"
+                "title": "Monthly Position Count by Division (Level 2)"
               },
               "mark": {
                 "colors": [
