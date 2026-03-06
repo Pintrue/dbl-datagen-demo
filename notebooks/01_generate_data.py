@@ -487,8 +487,7 @@ RISK_GREEKS_JOIN_MAP = {
 
 
 def build_risk_greeks_via_join(spark, risk_table, position_df, unit_sens_df,
-                                sample_df, target_rows, date_begin, years,
-                                sensitivity_multiplier_df=None):
+                                sample_df, target_rows, date_begin, years):
     """Derive a position_risk_greeks table by equi-joining positions with unit_sensitivities
     on position.Instrument_Id = unit_sens.Parent_Instrument_Id (and optionally
     Instrument_Id_Type = Parent_Instrument_Id_Type when both columns exist).
@@ -543,29 +542,6 @@ def build_risk_greeks_via_join(spark, risk_table, position_df, unit_sens_df,
         joined = joined.drop("Parent_Instrument_Id_Type")
         joined = joined.withColumn("Parent_Instrument_Id_Type", F.col("Instrument_Id_Type"))
 
-    # Apply time-varying sensitivity multiplier so risk exposure evolves realistically
-    # over time. Each instrument is bucketed and assigned a random-walk multiplier
-    # per month derived from a pre-computed lookup table.
-    if sensitivity_multiplier_df is not None:
-        n_buckets = sensitivity_multiplier_df.select("instrument_bucket").distinct().count()
-        joined = joined \
-            .withColumn(
-                "instrument_bucket",
-                (F.abs(F.hash(F.col("Instrument_Id").cast("string"))) % n_buckets)
-                .cast(IntegerType())
-            ) \
-            .withColumn(
-                "month_idx",
-                F.months_between(F.col("Business_Date"), F.lit(date_begin)).cast(IntegerType())
-            )
-        joined = joined.join(sensitivity_multiplier_df, on=["instrument_bucket", "month_idx"], how="left")
-        joined = joined \
-            .withColumn(
-                "Sensitivity_Value",
-                F.col("Sensitivity_Value") * F.coalesce(F.col("sensitivity_multiplier"), F.lit(1.0))
-            ) \
-            .drop("instrument_bucket", "month_idx", "sensitivity_multiplier")
-
     # Map to target schema: select matching columns, fill any missing with null.
     # Business_Date is inherited from position (monthly spine) — not in the RADIAL
     # sample schema but preserved here so gold views can group by month correctly.
@@ -585,24 +561,6 @@ def build_risk_greeks_via_join(spark, risk_table, position_df, unit_sens_df,
     return result
 
 
-# Build a sensitivity multiplier lookup table: (instrument_bucket, month_idx) → multiplier.
-# Each bucket follows an independent random walk so book-level risk exposure shows
-# genuine trends and vol over the 10-year history rather than a flat line.
-_n_months  = YEARS * 12
-_n_buckets = 200
-import numpy as _np
-_np.random.seed(42)
-_monthly_returns   = _np.random.normal(0, 0.06, (_n_buckets, _n_months))
-_cum_multipliers   = _np.cumprod(1 + _monthly_returns, axis=1)
-sensitivity_multiplier_df = spark.createDataFrame(
-    [
-        (int(b), int(m), float(_cum_multipliers[b, m]))
-        for b in range(_n_buckets)
-        for m in range(_n_months)
-    ],
-    schema="instrument_bucket INT, month_idx INT, sensitivity_multiplier DOUBLE"
-).cache()
-
 for risk_table, unit_sens_table in RISK_GREEKS_JOIN_MAP.items():
     if risk_table not in samples:
         print(f"  Skipping {risk_table} — no sample file found")
@@ -620,7 +578,6 @@ for risk_table, unit_sens_table in RISK_GREEKS_JOIN_MAP.items():
         target_rows=ROWS_RISK_DEFAULT,
         date_begin=DATE_BEGIN,
         years=YEARS,
-        sensitivity_multiplier_df=sensitivity_multiplier_df,
     )
     if df is None:
         continue
