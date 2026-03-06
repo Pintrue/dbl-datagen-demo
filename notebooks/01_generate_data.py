@@ -399,63 +399,40 @@ for table_name in ordered_names:
     if table_name == "book_universe":
         gen_df = _add_book_path(gen_df)
 
-    # Expand position to a realistic monthly time-series with position turnover.
-    # Each position is assigned a start month and duration (1-24 months) derived
-    # from its Position_Id hash, so the portfolio composition changes each month.
-    # Positions that share an instrument carry that instrument's sensitivity through
-    # to risk_greeks, giving genuine time-variation in book-level risk exposure.
+    # Expand position to monthly snapshots by cross-joining with a date spine.
+    # Each position appears in every month with a varying Position_Qty derived
+    # from hash(Position_Id, month), so book-level risk exposure changes over time
+    # when joined with unit sensitivities.
     if table_name == "position":
         month_spine = spark.sql(f"""
-            SELECT
-                explode(sequence(
-                    DATE_TRUNC('MONTH', DATE '{DATE_BEGIN}'),
-                    DATE_TRUNC('MONTH', DATE '{DATE_END}'),
-                    INTERVAL 1 MONTH
-                )) AS Business_Date
+            SELECT explode(sequence(
+                DATE_TRUNC('MONTH', DATE '{DATE_BEGIN}'),
+                DATE_TRUNC('MONTH', DATE '{DATE_END}'),
+                INTERVAL 1 MONTH
+            )) AS Business_Date
         """)
         n_months = month_spine.count()
+        base_rows = gen_df.count()
+        gen_df = gen_df.crossJoin(month_spine)
 
-        # Index the spine so we can filter by position lifecycle
-        month_spine_idx = month_spine.withColumn(
-            "month_idx",
-            F.months_between(F.col("Business_Date"), F.lit(DATE_BEGIN)).cast(IntegerType())
+        # Vary Position_Qty per month: multiply by a hash-derived factor in [0.2, 1.8]
+        # so each position's size drifts over time, driving genuine variation in
+        # book-level risk exposure through the sensitivity join.
+        gen_df = gen_df.withColumn(
+            "Position_Qty",
+            F.col("Position_Qty") * (
+                0.2 + 1.6 * (
+                    F.abs(F.hash(F.concat(
+                        F.col("Position_Id").cast("string"),
+                        F.lit("_"),
+                        F.col("Business_Date").cast("string")
+                    ))) % 1000
+                ) / 1000.0
+            )
         )
 
-        # Assign each position a deterministic start month and duration
-        base_rows = gen_df.count()
-        gen_df = gen_df \
-            .withColumn(
-                "start_month_idx",
-                (F.abs(F.hash(F.col("Position_Id").cast("string"))) % n_months)
-                .cast(IntegerType())
-            ) \
-            .withColumn(
-                "duration_months",
-                # Range 1-24 months: most positions short-lived, some long-running
-                ((F.abs(F.hash(F.concat(
-                    F.col("Position_Id").cast("string"), F.lit("_dur")
-                ))) % 24) + 1).cast(IntegerType())
-            )
-
-        # Explode each position into its active months without a full cross-join
-        gen_df = gen_df \
-            .withColumn(
-                "active_month_indices",
-                F.expr(
-                    f"sequence(start_month_idx, "
-                    f"least(start_month_idx + duration_months - 1, {n_months - 1}))"
-                )
-            ) \
-            .select(
-                *[c for c in gen_df.columns
-                  if c not in ("start_month_idx", "duration_months")],
-                F.explode("active_month_indices").alias("month_idx")
-            ) \
-            .join(month_spine_idx, "month_idx") \
-            .drop("month_idx")
-
-        print(f"  Position turnover: {base_rows:,} base positions × avg ~12 months "
-              f"= {gen_df.count():,} rows across {n_months} monthly snapshots")
+        print(f"  Monthly expansion: {base_rows:,} positions × {n_months} months "
+              f"= {base_rows * n_months:,} rows (Position_Qty varies per month)")
 
     elapsed = (datetime.now() - start).total_seconds()
 
