@@ -297,6 +297,11 @@ print("Created: gold_fx_rates_timeseries")
 
 # COMMAND ----------
 
+NUM_BOOK_LEVELS = 11
+_level_cols = ",\n    ".join(
+    f"SPLIT(SDS_Book_Path, ':')[{i}] AS book_level_{i + 1}"
+    for i in range(NUM_BOOK_LEVELS)
+)
 spark.sql(f"""
 CREATE OR REPLACE TABLE {CATALOG}.{SCHEMA}.silver_book_hierarchy_flat AS
 SELECT
@@ -306,20 +311,62 @@ SELECT
     Desk_Code,
     Trading_Area_Name,
     SDS_Book_Path,
-    SPLIT(SDS_Book_Path, ':')[0]  AS book_level_1,
-    SPLIT(SDS_Book_Path, ':')[1]  AS book_level_2,
-    SPLIT(SDS_Book_Path, ':')[2]  AS book_level_3,
-    SPLIT(SDS_Book_Path, ':')[3]  AS book_level_4,
-    SPLIT(SDS_Book_Path, ':')[4]  AS book_level_5,
-    SPLIT(SDS_Book_Path, ':')[5]  AS book_level_6,
-    SPLIT(SDS_Book_Path, ':')[6]  AS book_level_7,
-    SPLIT(SDS_Book_Path, ':')[7]  AS book_level_8,
-    SPLIT(SDS_Book_Path, ':')[8]  AS book_level_9,
-    SPLIT(SDS_Book_Path, ':')[9]  AS book_level_10,
-    SPLIT(SDS_Book_Path, ':')[10] AS book_level_11
+    {_level_cols}
 FROM {CATALOG}.{SCHEMA}.book_universe
 """)
 print("Created: silver_book_hierarchy_flat")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Silver Table: Risk Exposure by Book Level (Materialized)
+# MAGIC
+# MAGIC Pre-aggregates risk sensitivity by all 11 book levels + month + sensitivity type.
+# MAGIC This is the source of truth for all book-level risk time-series queries.
+
+# COMMAND ----------
+
+_group_cols = ", ".join(f"b.book_level_{i}" for i in range(1, NUM_BOOK_LEVELS + 1))
+spark.sql(f"""
+CREATE OR REPLACE TABLE {CATALOG}.{SCHEMA}.silver_risk_book_level_monthly AS
+SELECT
+    DATE_TRUNC('MONTH', r.Business_Date) AS Business_Month,
+    {_group_cols},
+    r.Sensitivity_Type,
+    ROUND(SUM(r.Sensitivity_Value), 2) AS total_exposure,
+    COUNT(*)                           AS record_count
+FROM {CATALOG}.{SCHEMA}.position_risk_greeks_assetlevel r
+JOIN {CATALOG}.{SCHEMA}.silver_book_hierarchy_flat b ON r.Folder_Id = b.Folder_Id
+GROUP BY DATE_TRUNC('MONTH', r.Business_Date), {_group_cols}, r.Sensitivity_Type
+""")
+print("Created: silver_risk_book_level_monthly")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Gold View: Risk Exposure by Book Level (Long Format)
+# MAGIC
+# MAGIC Stacks all 11 levels into `level_label` / `level_value` columns so the
+# MAGIC dashboard can filter to any level dynamically without changing the query.
+
+# COMMAND ----------
+
+_union_parts = []
+for i in range(NUM_BOOK_LEVELS):
+    lvl = i + 1
+    _union_parts.append(
+        f"SELECT Business_Month, Sensitivity_Type, "
+        f"{lvl} AS level_num, 'Level {lvl}' AS level_label, "
+        f"book_level_{lvl} AS level_value, "
+        f"SUM(total_exposure) AS total_exposure "
+        f"FROM {CATALOG}.{SCHEMA}.silver_risk_book_level_monthly "
+        f"GROUP BY Business_Month, Sensitivity_Type, book_level_{lvl}"
+    )
+spark.sql(
+    f"CREATE OR REPLACE VIEW {CATALOG}.{SCHEMA}.gold_risk_book_level_long AS\n"
+    + "\nUNION ALL\n".join(_union_parts)
+)
+print("Created: gold_risk_book_level_long")
 
 # COMMAND ----------
 
@@ -381,6 +428,7 @@ print("Created: gold_position_book_level_monthly")
 
 silver_tables = [
     "silver_book_hierarchy_flat",
+    "silver_risk_book_level_monthly",
 ]
 gold_views = [
     "gold_position_by_currency",
@@ -397,6 +445,7 @@ gold_views = [
     "gold_fx_rates_timeseries",
     "gold_position_by_book_level",
     "gold_position_book_level_monthly",
+    "gold_risk_book_level_long",
 ]
 
 print(f"\n{'='*60}")
