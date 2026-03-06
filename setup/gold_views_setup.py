@@ -39,6 +39,7 @@ SELECT
     COUNT(DISTINCT Folder_Id)        AS unique_books,
     COUNT(DISTINCT Instrument_Id)    AS unique_instruments
 FROM {CATALOG}.{SCHEMA}.position
+WHERE Business_Date = (SELECT MAX(Business_Date) FROM {CATALOG}.{SCHEMA}.position)
 GROUP BY Currency_Code
 ORDER BY position_count DESC
 """)
@@ -165,6 +166,7 @@ SELECT
     ROUND(SUM(p.Position_Qty), 2) AS total_quantity
 FROM {CATALOG}.{SCHEMA}.position p
 JOIN {CATALOG}.{SCHEMA}.book_universe b ON p.Folder_Id = b.Folder_Id
+WHERE p.Business_Date = (SELECT MAX(Business_Date) FROM {CATALOG}.{SCHEMA}.position)
 GROUP BY p.Currency_Code, b.Book_Location_Code, b.Desk_Code
 ORDER BY position_count DESC
 """)
@@ -187,6 +189,7 @@ SELECT
     ROUND(SUM(p.Position_Qty), 2) AS total_quantity
 FROM {CATALOG}.{SCHEMA}.position p
 JOIN {CATALOG}.{SCHEMA}.instrument i ON p.Instrument_Id = i.Instrument_Id
+WHERE p.Business_Date = (SELECT MAX(Business_Date) FROM {CATALOG}.{SCHEMA}.position)
 GROUP BY i.Type, i.Class_Code, i.Currency
 ORDER BY position_count DESC
 """)
