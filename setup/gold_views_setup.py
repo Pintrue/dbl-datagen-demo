@@ -355,18 +355,19 @@ print("Created: gold_position_by_book_level")
 spark.sql(f"""
 CREATE OR REPLACE VIEW {CATALOG}.{SCHEMA}.gold_position_book_level_monthly AS
 SELECT
-    p.Business_Date                        AS Business_Month,
+    DATE_TRUNC('MONTH', r.Business_Date)   AS Business_Month,
     b.book_level_1,
     b.book_level_2,
     b.book_level_3,
-    COUNT(*)                               AS position_count,
-    ROUND(SUM(p.Position_Qty), 2)          AS total_quantity
-FROM {CATALOG}.{SCHEMA}.position p
+    r.Sensitivity_Type,
+    COUNT(*)                               AS record_count,
+    ROUND(SUM(r.Sensitivity_Value), 2)     AS total_exposure
+FROM {CATALOG}.{SCHEMA}.position_risk_greeks_assetlevel r
 JOIN {CATALOG}.{SCHEMA}.silver_book_hierarchy_flat b
-    ON p.Folder_Id = b.Folder_Id
+    ON r.Folder_Id = b.Folder_Id
 GROUP BY
-    p.Business_Date,
-    b.book_level_1, b.book_level_2, b.book_level_3
+    DATE_TRUNC('MONTH', r.Business_Date),
+    b.book_level_1, b.book_level_2, b.book_level_3, r.Sensitivity_Type
 ORDER BY Business_Month
 """)
 print("Created: gold_position_book_level_monthly")

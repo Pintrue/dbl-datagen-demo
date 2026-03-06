@@ -4,84 +4,84 @@
       "name": "ds_pos_ccy",
       "displayName": "Position by Currency",
       "queryLines": [
-        "SELECT * FROM <YOUR_CATALOG>.<YOUR_SCHEMA>.gold_position_by_currency"
+        "SELECT * FROM pinchu_ye.barclays_atlas_demo.gold_position_by_currency"
       ]
     },
     {
       "name": "ds_book_hier",
       "displayName": "Book Hierarchy",
       "queryLines": [
-        "SELECT * FROM <YOUR_CATALOG>.<YOUR_SCHEMA>.gold_book_hierarchy"
+        "SELECT * FROM pinchu_ye.barclays_atlas_demo.gold_book_hierarchy"
       ]
     },
     {
       "name": "ds_instr",
       "displayName": "Instrument Breakdown",
       "queryLines": [
-        "SELECT * FROM <YOUR_CATALOG>.<YOUR_SCHEMA>.gold_instrument_breakdown"
+        "SELECT * FROM pinchu_ye.barclays_atlas_demo.gold_instrument_breakdown"
       ]
     },
     {
       "name": "ds_fx",
       "displayName": "FX Rates Summary",
       "queryLines": [
-        "SELECT CONCAT(Base_Currency, '/', Reporting_Currency) AS Currency_Pair, ROUND(min_rate, 4) AS min_rate, ROUND(max_rate, 4) AS max_rate, ROUND(avg_rate, 4) AS avg_rate FROM <YOUR_CATALOG>.<YOUR_SCHEMA>.gold_fx_rates_summary ORDER BY Currency_Pair"
+        "SELECT CONCAT(Base_Currency, '/', Reporting_Currency) AS Currency_Pair, ROUND(min_rate, 4) AS min_rate, ROUND(max_rate, 4) AS max_rate, ROUND(avg_rate, 4) AS avg_rate FROM pinchu_ye.barclays_atlas_demo.gold_fx_rates_summary ORDER BY Currency_Pair"
       ]
     },
     {
       "name": "ds_greeks",
       "displayName": "Risk Greeks Exposure",
       "queryLines": [
-        "SELECT * FROM <YOUR_CATALOG>.<YOUR_SCHEMA>.gold_risk_greeks_exposure"
+        "SELECT * FROM pinchu_ye.barclays_atlas_demo.gold_risk_greeks_exposure"
       ]
     },
     {
       "name": "ds_ccy_risk",
       "displayName": "Currency Risk (DELTA)",
       "queryLines": [
-        "SELECT Currency_Id, total_exposure FROM <YOUR_CATALOG>.<YOUR_SCHEMA>.gold_currency_risk_exposure WHERE Sensitivity_Type = 'FxDelta'"
+        "SELECT Currency_Id, total_exposure FROM pinchu_ye.barclays_atlas_demo.gold_currency_risk_exposure WHERE Sensitivity_Type = 'FxDelta'"
       ]
     },
     {
       "name": "ds_book_risk",
       "displayName": "Book Risk Exposure",
       "queryLines": [
-        "SELECT Book_Location_Code AS Location_Code, Sensitivity_Type, SUM(total_sensitivity) AS Total_Exposure FROM <YOUR_CATALOG>.<YOUR_SCHEMA>.gold_book_risk_exposure GROUP BY Book_Location_Code, Sensitivity_Type ORDER BY Total_Exposure DESC"
+        "SELECT Book_Location_Code AS Location_Code, Sensitivity_Type, SUM(total_sensitivity) AS Total_Exposure FROM pinchu_ye.barclays_atlas_demo.gold_book_risk_exposure GROUP BY Book_Location_Code, Sensitivity_Type ORDER BY Total_Exposure DESC"
       ]
     },
     {
       "name": "ds_book_delta",
       "displayName": "Book Risk (DELTA)",
       "queryLines": [
-        "SELECT Book_Location_Code AS Location_Code, SUM(total_sensitivity) AS Total_Exposure FROM <YOUR_CATALOG>.<YOUR_SCHEMA>.gold_book_risk_exposure WHERE Sensitivity_Type = 'Delta' GROUP BY Book_Location_Code ORDER BY Total_Exposure DESC"
+        "SELECT Book_Location_Code AS Location_Code, SUM(total_sensitivity) AS Total_Exposure FROM pinchu_ye.barclays_atlas_demo.gold_book_risk_exposure WHERE Sensitivity_Type = 'Delta' GROUP BY Book_Location_Code ORDER BY Total_Exposure DESC"
       ]
     },
     {
       "name": "ds_risk_monthly",
       "displayName": "Risk Exposure Monthly",
       "queryLines": [
-        "SELECT * FROM <YOUR_CATALOG>.<YOUR_SCHEMA>.gold_risk_exposure_monthly ORDER BY Business_Month"
+        "SELECT * FROM pinchu_ye.barclays_atlas_demo.gold_risk_exposure_monthly ORDER BY Business_Month"
       ]
     },
     {
       "name": "ds_fx_ts",
       "displayName": "FX Rates Timeseries",
       "queryLines": [
-        "SELECT * FROM <YOUR_CATALOG>.<YOUR_SCHEMA>.gold_fx_rates_timeseries ORDER BY Business_Month"
+        "SELECT * FROM pinchu_ye.barclays_atlas_demo.gold_fx_rates_timeseries ORDER BY Business_Month"
       ]
     },
     {
       "name": "ds_pos_book_level",
       "displayName": "Position by Book Level",
       "queryLines": [
-        "SELECT * FROM <YOUR_CATALOG>.<YOUR_SCHEMA>.gold_position_by_book_level"
+        "SELECT * FROM pinchu_ye.barclays_atlas_demo.gold_position_by_book_level"
       ]
     },
     {
       "name": "ds_pos_book_monthly",
       "displayName": "Position Book Level Monthly",
       "queryLines": [
-        "SELECT * FROM <YOUR_CATALOG>.<YOUR_SCHEMA>.gold_position_book_level_monthly ORDER BY Business_Month"
+        "SELECT * FROM pinchu_ye.barclays_atlas_demo.gold_position_book_level_monthly ORDER BY Business_Month"
       ]
     }
   ],
@@ -1633,8 +1633,8 @@
                       "expression": "`book_level_2`"
                     },
                     {
-                      "name": "position_count",
-                      "expression": "SUM(`position_count`)"
+                      "name": "total_exposure",
+                      "expression": "SUM(`total_exposure`)"
                     }
                   ],
                   "disaggregated": false
@@ -1653,11 +1653,11 @@
                   "displayName": "Month"
                 },
                 "y": {
-                  "fieldName": "position_count",
+                  "fieldName": "total_exposure",
                   "scale": {
                     "type": "quantitative"
                   },
-                  "displayName": "Position Count"
+                  "displayName": "Risk Exposure"
                 },
                 "color": {
                   "fieldName": "book_level_2",
@@ -1669,7 +1669,7 @@
               },
               "frame": {
                 "showTitle": true,
-                "title": "Monthly Position Count by Division (Level 2)"
+                "title": "Monthly Risk Exposure by Division (Level 2)"
               },
               "mark": {
                 "colors": [
