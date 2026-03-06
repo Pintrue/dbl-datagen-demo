@@ -78,13 +78,6 @@
       ]
     },
     {
-      "name": "ds_pos_book_monthly",
-      "displayName": "Position Book Level Monthly",
-      "queryLines": [
-        "SELECT * FROM pinchu_ye.atlas_radial_test.gold_position_book_level_monthly ORDER BY Business_Month"
-      ]
-    },
-    {
       "name": "ds_risk_book_long",
       "displayName": "Risk Exposure by Book Level (All Levels)",
       "queryLines": [

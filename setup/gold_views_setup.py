@@ -395,33 +395,6 @@ print("Created: gold_position_by_book_level")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Gold View 14: Monthly Position Exposure by Book Level (Time Series)
-
-# COMMAND ----------
-
-spark.sql(f"""
-CREATE OR REPLACE VIEW {CATALOG}.{SCHEMA}.gold_position_book_level_monthly AS
-SELECT
-    DATE_TRUNC('MONTH', r.Business_Date)   AS Business_Month,
-    b.book_level_1,
-    b.book_level_2,
-    b.book_level_3,
-    r.Sensitivity_Type,
-    COUNT(*)                               AS record_count,
-    ROUND(SUM(r.Sensitivity_Value), 2)     AS total_exposure
-FROM {CATALOG}.{SCHEMA}.position_risk_greeks_assetlevel r
-JOIN {CATALOG}.{SCHEMA}.silver_book_hierarchy_flat b
-    ON r.Folder_Id = b.Folder_Id
-GROUP BY
-    DATE_TRUNC('MONTH', r.Business_Date),
-    b.book_level_1, b.book_level_2, b.book_level_3, r.Sensitivity_Type
-ORDER BY Business_Month
-""")
-print("Created: gold_position_book_level_monthly")
-
-# COMMAND ----------
-
-# MAGIC %md
 # MAGIC ## Summary
 
 # COMMAND ----------
@@ -444,7 +417,6 @@ gold_views = [
     "gold_risk_exposure_monthly",
     "gold_fx_rates_timeseries",
     "gold_position_by_book_level",
-    "gold_position_book_level_monthly",
     "gold_risk_book_level_long",
 ]
 
