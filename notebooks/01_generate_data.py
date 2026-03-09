@@ -511,6 +511,28 @@ def build_risk_greeks_via_join(spark, risk_table, position_df, unit_sens_df,
 
     joined = position_df.join(unit_sens_slim, on=join_cond, how="inner")
 
+    # Vary Sensitivity_Value per (instrument, month) to reflect changing market
+    # conditions, then scale by Position_Qty (which also varies per month).
+    # Result: position-level risk = unit_sensitivity × market_factor × position_size
+    if "Business_Date" in joined.columns:
+        joined = joined.withColumn(
+            "Sensitivity_Value",
+            F.col("Sensitivity_Value") * (
+                0.5 + 1.0 * (
+                    F.abs(F.hash(F.concat(
+                        F.col("Instrument_Id").cast("string"),
+                        F.lit("_sv_"),
+                        F.col("Business_Date").cast("string")
+                    ))) % 1000
+                ) / 1000.0
+            )
+        )
+    if "Position_Qty" in joined.columns:
+        joined = joined.withColumn(
+            "Sensitivity_Value",
+            F.col("Sensitivity_Value") * F.col("Position_Qty")
+        )
+
     # Drop the FK columns from unit_sens side (equal to position's Instrument_Id/Type)
     # then re-expose them under the Parent_* names expected by the target schema.
     joined = joined.drop("Parent_Instrument_Id")
