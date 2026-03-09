@@ -84,10 +84,38 @@ based on the RADIAL risk management system schema.
 - **gold_position_instrument_summary**: Positions joined to instrument details
 - **gold_book_risk_exposure**: Book-level aggregated risk (3-way join)
 - **gold_package_composition**: Structured product composition summary
+- **gold_position_by_book_level**: Latest-month position count and quantity by book levels 1-4
 
 ### Historical / Time-Series Views
 - **gold_risk_exposure_monthly**: Monthly risk exposure by sensitivity type — use for trends, backtesting, period comparisons. Columns: Business_Month, Sensitivity_Type, record_count, total_exposure, avg_sensitivity
 - **gold_fx_rates_timeseries**: Monthly FX rates by currency pair — use for FX trend analysis. Columns: Business_Month, Base_Currency, Reporting_Currency, Currency_Pair, avg_rate, min_rate, max_rate, observations
+- **gold_risk_book_level_long**: Monthly risk exposure at any book hierarchy level. Columns: Business_Month, Sensitivity_Type, level_num (1-11), level_label, level_value, total_exposure. Filter by level_num to choose aggregation level.
+
+## Book Hierarchy
+The book hierarchy has 11 levels derived from SDS_Book_Path (colon-delimited).
+- **silver_book_hierarchy_flat**: Flattened book hierarchy with book_level_1 through book_level_11
+- **silver_risk_book_level_monthly**: Pre-aggregated risk by all 11 book levels, month, and sensitivity type
+
+Level meanings:
+- Level 1: Group Entity (e.g. Barclays Group)
+- Level 2: Division (e.g. Markets, Banking, Corporate)
+- Level 3: Asset Class (e.g. Equities, Fixed Income, FX & Rates)
+- Level 4: Business Area (e.g. Flow Trading, Prime Services, Derivatives)
+- Level 5: Sub-Business
+- Level 6: Region (e.g. EMEA, Americas, Asia Pacific)
+- Level 7: Country
+- Level 8: Legal Entity
+- Level 9: Portfolio Status
+- Level 10: Regulatory Scope
+- Level 11: Individual Book (BK-{Folder_Id})
+
+To query risk exposure by book hierarchy, join position_risk_greeks_assetlevel with silver_book_hierarchy_flat on Folder_Id, then GROUP BY the desired book_level columns.
+
+### Book Hierarchy Queries
+- "Show monthly risk exposure for the Markets division by asset class" → JOIN position_risk_greeks_assetlevel r WITH silver_book_hierarchy_flat b ON r.Folder_Id = b.Folder_Id, WHERE b.book_level_2 = 'Markets', GROUP BY month, b.book_level_3, r.Sensitivity_Type
+- "Compare risk exposure across regions" → same join, GROUP BY b.book_level_6
+- "What is the total delta exposure for Equities?" → same join, WHERE b.book_level_3 = 'Equities' AND r.Sensitivity_Type = 'Delta'
+- "Aggregate risk to Level 2" → query gold_risk_book_level_long WHERE level_num = 2
 
 ## Common Questions
 
@@ -175,9 +203,11 @@ GOLD_TABLES = [
     "gold_book_hierarchy", "gold_book_risk_exposure", "gold_currency_risk_exposure",
     "gold_fx_rates_summary", "gold_fx_rates_timeseries",
     "gold_instrument_breakdown", "gold_package_composition",
-    "gold_position_book_summary", "gold_position_by_currency",
-    "gold_position_instrument_summary", "gold_risk_exposure_monthly",
+    "gold_position_book_summary", "gold_position_by_book_level",
+    "gold_position_by_currency", "gold_position_instrument_summary",
+    "gold_risk_book_level_long", "gold_risk_exposure_monthly",
     "gold_risk_greeks_exposure",
+    "silver_book_hierarchy_flat", "silver_risk_book_level_monthly",
 ]
 
 if SPACE_ID:
