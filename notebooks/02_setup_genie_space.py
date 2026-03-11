@@ -7,7 +7,7 @@
 # MAGIC
 # MAGIC **Programmatic coverage:**
 # MAGIC - Genie space creation: Python SDK (`w.genie.create_space`) ✅
-# MAGIC - Dataset registration (10 Gold views): Python SDK (`w.genie.update_space` with `serialized_space`) ✅
+# MAGIC - Dataset registration (6 tables/views): Python SDK (`w.genie.update_space` with `serialized_space`) ✅
 # MAGIC - Space ID persisted to UC metadata table ✅
 # MAGIC - Connecting Genie to AI/BI Dashboard: **manual step in UI** ⚠️
 # MAGIC   (dashboard widget → Genie integration has no public API as of Feb 2026)
@@ -57,90 +57,65 @@ print(f"Warehouse: {WAREHOUSE_ID}")
 
 # COMMAND ----------
 
-GENIE_INSTRUCTIONS = """
-You are a financial risk analyst assistant for an investment bank's trading desk.
-The data covers synthetic trading positions, risk sensitivities (Greeks), instruments, and FX rates
-based on the RADIAL risk management system schema.
+import hashlib
 
-## Data Model
-- **position**: Individual trading positions with currency, quantity, book and instrument references
-- **book_universe**: Trading book hierarchy — location, desk, trading area
-- **instrument**: Financial instruments with type, class, and currency
-- **fx_rates**: FX rate time series across currency pairs
-- **position_risk_greeks_assetlevel**: Asset-level risk sensitivities (delta, gamma, vega, etc.)
-- **position_risk_greeks_currency**: Currency-level aggregated risk exposure
-- **package_composition**: Structured product decompositions
+# Concise text instructions — kept short to avoid Genie "long instruction" warning.
+# SQL query patterns are in EXAMPLE_QUESTION_SQLS below (more effective for Genie).
+GENIE_TEXT_INSTRUCTIONS = [
+    (
+        "You are a financial risk analyst assistant for an investment bank's trading desk. "
+        "All exposure values (total_exposure) are in GBP, converted via FX rates. "
+        "Data spans January 2015 to December 2024 (120 monthly snapshots). "
+        "When users ask about 'risk' without specifying a type, default to Sensitivity_Type = 'Delta'. "
+        "When users ask about 'all risk' or 'total exposure', aggregate across all Sensitivity_Type values. "
+        "For 'latest' or 'current' queries, use: Business_Month = (SELECT MAX(Business_Month) FROM <table>). "
+        "Business_Month is a timestamp truncated to the first of each month (e.g. 2024-01-01)."
+    ),
+    (
+        "Sensitivity_Type values (case-sensitive): Delta, DeltaCash, Gamma, GammaCash, SpotLevel, SpotLevelCash, Vega, VegaCash. "
+        "Delta = sensitivity to underlying price change. Gamma = sensitivity to delta change (convexity). Vega = sensitivity to volatility. "
+        "Cash variants (DeltaCash, GammaCash, VegaCash) are cash-equivalent of the Greek in GBP."
+    ),
+    (
+        "Book hierarchy has 11 levels. "
+        "Level 1 (Group Entity): Barclays Group, BCSL Holdings, Barclays International. "
+        "Level 2 (Division): Banking, Corporate, Markets. "
+        "Level 3 (Asset Class): Commodities, Equities, FX & Rates, Fixed Income, Multi-Asset. "
+        "Level 4 (Business Area): Derivatives, Flow Trading, Macro Rates, Origination, Prime Services. "
+        "Level 5 (Sub-Business): Cash Products, Credit Trading, Delta One, Options & Exotics, Rates Swaps. "
+        "Level 6 (Region): Americas, Asia Pacific, EMEA. "
+        "Level 7 (Country): Continental Europe, Japan, North America, SE Asia, UK. "
+        "Level 8 (Legal Entity): BBIL, BBPLC, BNAC, BSAG. "
+        "Level 9 (Portfolio Status): Active Books, Legacy Portfolio, Run-Off. "
+        "Level 10 (Regulatory Scope): In-Scope, Out-of-Scope, Regulatory Capital. "
+        "Level 11: Individual Book (BK-{Folder_Id})."
+    ),
+    (
+        "Primary_Asset_Ref is a stock ticker with exchange suffixes: .O=NASDAQ, .N=NYSE, .L=LSE, .DE=XETRA, .T=Tokyo, .HK=HKEX. "
+        "Map company names to tickers: Apple=AAPL.O, Microsoft=MSFT.O, Google=GOOGL.O, Amazon=AMZN.O, NVIDIA=NVDA.O, Tesla=TSLA.O, "
+        "Barclays=BARC.L, HSBC=HSBA.L, Shell=SHEL.L, BP=BP.L, AstraZeneca=AZN.L, Vodafone=VOD.L, "
+        "JPMorgan=JPM.N, Goldman Sachs=GS.N, SAP=SAP.DE, ASML=ASML.AS, Samsung=005930.KS, Tencent=0700.HK."
+    ),
+    (
+        "gold_risk_book_level_long has columns: Business_Month, Sensitivity_Type, level_num (1-11), level_label, level_value, total_exposure. "
+        "Filter by level_num to choose aggregation level. For example level_num=3 gives asset class breakdown."
+    ),
+]
 
-## Gold Views (use these for analytics)
-
-### Current Snapshot Views
-- **gold_position_by_currency**: Position counts and quantities aggregated by currency
-- **gold_book_hierarchy**: Book structure by location, desk and trading area
-- **gold_instrument_breakdown**: Instrument types and classes
-- **gold_fx_rates_summary**: FX rate ranges across currency pairs
-- **gold_risk_greeks_exposure**: Risk sensitivity exposure by type (delta, gamma, vega, rho, theta)
-- **gold_currency_risk_exposure**: Currency-level sensitivity totals
-- **gold_position_book_summary**: Positions joined to book hierarchy
-- **gold_position_instrument_summary**: Positions joined to instrument details
-- **gold_book_risk_exposure**: Book-level aggregated risk (3-way join)
-- **gold_package_composition**: Structured product composition summary
-- **gold_position_by_book_level**: Latest-month position count and quantity by book levels 1-4
-
-### Historical / Time-Series Views
-- **gold_risk_exposure_monthly**: Monthly risk exposure by sensitivity type — use for trends, backtesting, period comparisons. Columns: Business_Month, Sensitivity_Type, record_count, total_exposure, avg_sensitivity
-- **gold_fx_rates_timeseries**: Monthly FX rates by currency pair — use for FX trend analysis. Columns: Business_Month, Base_Currency, Reporting_Currency, Currency_Pair, avg_rate, min_rate, max_rate, observations
-- **gold_risk_book_level_long**: Monthly risk exposure at any book hierarchy level. Columns: Business_Month, Sensitivity_Type, level_num (1-11), level_label, level_value, total_exposure. Filter by level_num to choose aggregation level.
-
-## Book Hierarchy
-The book hierarchy has 11 levels derived from SDS_Book_Path (colon-delimited).
-- **silver_book_hierarchy_flat**: Flattened book hierarchy with book_level_1 through book_level_11
-- **silver_risk_book_level_monthly**: Pre-aggregated risk by all 11 book levels, month, and sensitivity type
-
-Level meanings:
-- Level 1: Group Entity (e.g. Barclays Group)
-- Level 2: Division (e.g. Markets, Banking, Corporate)
-- Level 3: Asset Class (e.g. Equities, Fixed Income, FX & Rates)
-- Level 4: Business Area (e.g. Flow Trading, Prime Services, Derivatives)
-- Level 5: Sub-Business
-- Level 6: Region (e.g. EMEA, Americas, Asia Pacific)
-- Level 7: Country
-- Level 8: Legal Entity
-- Level 9: Portfolio Status
-- Level 10: Regulatory Scope
-- Level 11: Individual Book (BK-{Folder_Id})
-
-To query risk exposure by book hierarchy, join position_risk_greeks_assetlevel with silver_book_hierarchy_flat on Folder_Id, then GROUP BY the desired book_level columns.
-
-### Book Hierarchy Queries
-- "Show monthly risk exposure for the Markets division by asset class" → JOIN position_risk_greeks_assetlevel r WITH silver_book_hierarchy_flat b ON r.Folder_Id = b.Folder_Id, WHERE b.book_level_2 = 'Markets', GROUP BY month, b.book_level_3, r.Sensitivity_Type
-- "Compare risk exposure across regions" → same join, GROUP BY b.book_level_6
-- "What is the total delta exposure for Equities?" → same join, WHERE b.book_level_3 = 'Equities' AND r.Sensitivity_Type = 'Delta'
-- "Aggregate risk to Level 2" → query gold_risk_book_level_long WHERE level_num = 2
-
-## Common Questions
-
-### Current State
-- "What is our total delta exposure?" → query gold_risk_greeks_exposure where Sensitivity_Type = 'DELTA'
-- "Which books have the most positions?" → query gold_position_book_summary
-- "Show FX exposure by currency pair" → query gold_currency_risk_exposure or gold_fx_rates_summary
-- "Break down instruments by type" → query gold_instrument_breakdown
-- "What currencies do we trade?" → query gold_position_by_currency
-
-### Historical / Backtesting
-- "How did our delta exposure change over the last year?" → query gold_risk_exposure_monthly WHERE Sensitivity_Type = 'DELTA' AND Business_Month >= '2024-01-01'
-- "Compare vega exposure between 2022 and 2024" → query gold_risk_exposure_monthly WHERE Sensitivity_Type = 'VEGA' and compare years
-- "Show me the GBP/USD FX rate trend" → query gold_fx_rates_timeseries WHERE Currency_Pair = 'GBP/USD'
-- "What was our total risk exposure in Q3 2023?" → query gold_risk_exposure_monthly WHERE Business_Month BETWEEN '2023-07-01' AND '2023-09-01'
-- "Which quarter had the highest gamma exposure?" → query gold_risk_exposure_monthly WHERE Sensitivity_Type = 'GAMMA', group by quarter
-
-## Terminology
-- Greeks: delta, gamma, vega, rho, theta — risk sensitivity measures
-- DV01: Dollar value of a basis point (interest rate sensitivity)
-- Book/Folder: Trading book organisational unit
-- Position_Qty: Number of contracts or units held
-- Business_Date/Business_Month: The date of the risk calculation snapshot
-- Backtesting: Comparing historical risk predictions against actual outcomes
-""".strip()
+# Example SQL pairs — Genie learns these patterns and generalises to similar questions.
+# Each entry needs: id (32-hex), question (array), sql (array).
+EXAMPLE_QUESTION_SQLS = [
+    ("What is our overall delta exposure right now?",
+     "SELECT SUM(total_exposure) AS total_delta_exposure FROM {s}.silver_risk_book_level_monthly WHERE Sensitivity_Type = 'Delta' AND Business_Month = (SELECT MAX(Business_Month) FROM {s}.silver_risk_book_level_monthly)"),
+    ("Break down our risk by asset class",
+     "SELECT level_value AS asset_class, SUM(total_exposure) AS total_exposure FROM {s}.gold_risk_book_level_long WHERE level_num = 3 AND Sensitivity_Type = 'Delta' AND Business_Month = (SELECT MAX(Business_Month) FROM {s}.gold_risk_book_level_long) GROUP BY level_value ORDER BY ABS(total_exposure) DESC"),
+    ("Which stocks are we most exposed to?",
+     "SELECT Primary_Asset_Ref, SUM(total_exposure) AS total_exposure FROM {s}.gold_risk_asset_book_monthly WHERE Sensitivity_Type = 'Delta' AND Business_Month = (SELECT MAX(Business_Month) FROM {s}.gold_risk_asset_book_monthly) GROUP BY Primary_Asset_Ref ORDER BY ABS(total_exposure) DESC LIMIT 20"),
+    ("How does risk compare across EMEA, Americas, and Asia Pacific?",
+     "SELECT level_value AS region, Business_Month, SUM(total_exposure) AS total_exposure FROM {s}.gold_risk_book_level_long WHERE level_num = 6 AND Sensitivity_Type = 'Delta' GROUP BY level_value, Business_Month ORDER BY Business_Month"),
+    ("How has our risk changed year on year?",
+     "SELECT YEAR(Business_Month) AS year, SUM(total_exposure) AS total_exposure FROM {s}.silver_risk_book_level_monthly WHERE Sensitivity_Type = 'Delta' GROUP BY YEAR(Business_Month) ORDER BY year"),
+]
 
 # COMMAND ----------
 
@@ -200,14 +175,12 @@ if not SPACE_ID:
 # COMMAND ----------
 
 GOLD_TABLES = [
-    "gold_book_hierarchy", "gold_book_risk_exposure", "gold_currency_risk_exposure",
-    "gold_fx_rates_summary", "gold_fx_rates_timeseries",
-    "gold_instrument_breakdown", "gold_package_composition",
-    "gold_position_book_summary", "gold_position_by_book_level",
-    "gold_position_by_currency", "gold_position_instrument_summary",
-    "gold_risk_book_level_long", "gold_risk_exposure_monthly",
-    "gold_risk_greeks_exposure",
-    "silver_book_hierarchy_flat", "silver_risk_book_level_monthly",
+    "gold_position_by_book_level",
+    "gold_risk_asset_book_monthly",
+    "gold_risk_book_level_long",
+    "silver_book_hierarchy_flat",
+    "silver_risk_asset_book_monthly",
+    "silver_risk_book_level_monthly",
 ]
 
 if SPACE_ID:
@@ -217,14 +190,29 @@ if SPACE_ID:
             [{"identifier": f"{CATALOG}.{SCHEMA}.{t}"} for t in GOLD_TABLES],
             key=lambda x: x["identifier"],
         )
+        fq = f"{CATALOG}.{SCHEMA}"
+        example_sqls = sorted([
+            {
+                "id": hashlib.md5(q.encode()).hexdigest(),
+                "question": [q],
+                "sql": [sql.format(s=fq)],
+            }
+            for q, sql in EXAMPLE_QUESTION_SQLS
+        ], key=lambda x: x["id"])
         w.genie.update_space(
             space_id=SPACE_ID,
             serialized_space=json.dumps({
                 "version": 2,
                 "data_sources": {"tables": tables_payload},
+                "instructions": {
+                    "text_instructions": [
+                        {"content": GENIE_TEXT_INSTRUCTIONS}
+                    ],
+                    "example_question_sqls": example_sqls,
+                },
             }),
         )
-        print(f"Registered {len(tables_payload)} Gold views as Genie datasets:")
+        print(f"Registered {len(tables_payload)} tables + {len(GENIE_TEXT_INSTRUCTIONS)} instructions + {len(example_sqls)} example SQLs:")
         for entry in tables_payload:
             print(f"  {entry['identifier']}")
     except Exception as e:

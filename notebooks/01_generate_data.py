@@ -5,9 +5,9 @@
 # MAGIC Generates scaled synthetic trading data from the 15 RADIAL sample files.
 # MAGIC
 # MAGIC **Data Model Entities:**
-# MAGIC - **Dimensions:** Book Universe, Instrument, RADIAL Instrument, FX Rates
-# MAGIC - **Facts:** Position, Package Composition
-# MAGIC - **Risk / Sensitivity:** Risk Greeks (3 levels), Arb Rules, Monikers, PnL Sensitivity, Unit Sensitivities (3 tables)
+# MAGIC - **Dimensions:** Book Universe, Instrument, FX Rates (deterministic GBP conversion)
+# MAGIC - **Facts:** Position
+# MAGIC - **Risk / Sensitivity:** Risk Greeks (2 levels), Unit Sensitivities (2 tables)
 # MAGIC
 # MAGIC **FK Integrity:**
 # MAGIC Core tables (Book, Instrument, Position, Risk Greeks) share consistent ID ranges
@@ -66,12 +66,7 @@ print(f"Sample dir: {SAMPLE_DIR}")
 ROW_TARGETS = {
     "book_universe":       int(2_000      * SCALE),  # 2K books
     "instrument":          int(400_000    * SCALE),  # 300-500K, midpoint
-    "radial_instrument":   int(400_000    * SCALE),  # matched to instrument
-    "fx_rates":            int(50_000     * SCALE),
     "position":            int(750_000    * SCALE),  # 500K-1M, midpoint
-    "package_composition": int(400_000    * SCALE),  # 300-500K, midpoint
-    "radial_arbrules":     int(5_000      * SCALE),  # 5K
-    "radial_monikers":     int(1_000_000  * SCALE),  # 1M
 }
 ROWS_RISK_DEFAULT = int(20_000_000 * SCALE)          # 20M per sensitivity table
 
@@ -205,7 +200,7 @@ def build_spec_from_sample(spark, table_name, sample_df, target_rows, partitions
 # COMMAND ----------
 
 CORE_TABLES = {
-    "book_universe", "instrument", "position", "package_composition",
+    "book_universe", "instrument", "position",
 }
 
 # Sensitivity tables whose Parent_Instrument_Id / Position_Id FKs must be pinned
@@ -213,8 +208,6 @@ CORE_TABLES = {
 SENSITIVITY_TABLES = {
     "radial_unit_sensitivities_asset_greeks",
     "radial_unit_sensitivities_asset_greeks_fully_decomposed",
-    "radial_unit_sensitivities_instruments_greeks",
-    "radial_pnl_sensitivity_commodities",
 }
 
 FK_COLUMN_RANGES = {
@@ -266,6 +259,57 @@ BOOK_PATH_LEVELS = [
     # L11 leaf: f"BK-{Folder_Id}" — unique per book (synthesised in _add_book_path)
 ]
 
+# ~95 realistic stock tickers spanning major sectors and geographies.
+# Assigned to position_risk_greeks_currency via hash of Instrument_Id so every
+# currency-decomposed risk row carries a primary asset reference for drill-down.
+PRIMARY_ASSET_REFS = [
+    # US Tech
+    "AAPL.O", "MSFT.O", "GOOGL.O", "AMZN.O", "META.O", "NVDA.O", "TSLA.O",
+    "CRM.O", "ADBE.O", "ORCL.N", "INTC.O", "CSCO.O", "IBM.N", "PYPL.O",
+    "NFLX.O", "UBER.N", "SNOW.N", "PLTR.N",
+    # US Semiconductors
+    "AMD.O", "AVGO.O", "QCOM.O", "TXN.O", "MU.O", "LRCX.O", "KLAC.O",
+    "MRVL.O", "NVMI.O", "AMAT.O",
+    # US Banks & Financials
+    "JPM.N", "BAC.N", "GS.N", "MS.N", "C.N", "WFC.N", "BLK.N", "SCHW.N",
+    "AXP.N", "V.N", "MA.N",
+    # US Healthcare & Pharma
+    "JNJ.N", "UNH.N", "PFE.N", "ABBV.N", "LLY.N", "MRK.N", "TMO.N",
+    "AMGN.O", "GILD.O", "ISRG.O",
+    # US Energy
+    "XOM.N", "CVX.N", "COP.N", "SLB.N", "EOG.N", "OXY.N",
+    # US Consumer & Industrial
+    "WMT.N", "PG.N", "KO.N", "PEP.O", "MCD.N", "NKE.N", "DIS.N",
+    "HD.N", "CAT.N", "BA.N", "UPS.N", "HON.O",
+    # UK
+    "BARC.L", "HSBA.L", "SHEL.L", "BP.L", "AZN.L", "GSK.L", "ULVR.L",
+    "RIO.L", "LLOY.L", "VOD.L",
+    # EU
+    "SAP.DE", "SIE.DE", "ALV.DE", "BAS.DE", "ASML.AS", "INGA.AS",
+    "SAN.MC", "BNP.PA", "TTE.PA", "OR.PA",
+    # Asia
+    "7203.T", "9984.T", "6758.T", "005930.KS", "000660.KS",
+    "0700.HK", "9988.HK", "3690.HK",
+    # Emerging Markets
+    "VALE3.SA", "ITUB4.SA", "RELIANCE.NS", "TCS.NS", "INFY.NS",
+]
+
+
+def _add_primary_asset_ref(df):
+    """Add Primary_Asset_Ref column using a hash of Instrument_Id.
+
+    Same deterministic-hash pattern as _add_book_path: each instrument maps to
+    one of ~95 realistic stock tickers so analysts can aggregate currency-level
+    risk exposure by primary asset reference.
+    """
+    n = len(PRIMARY_ASSET_REFS)
+    arr = F.array([F.lit(v) for v in PRIMARY_ASSET_REFS])
+    idx = (
+        F.abs(F.hash(F.concat(F.col("Instrument_Id").cast("string"), F.lit("|par"))))
+        % n
+    ).cast(IntegerType())
+    return df.withColumn("Primary_Asset_Ref", arr.getItem(idx))
+
 
 def get_fk_overrides(table_name, schema):
     if table_name not in CORE_TABLES and table_name not in SENSITIVITY_TABLES:
@@ -298,6 +342,12 @@ def get_fk_overrides(table_name, schema):
     # Override position Location_Code to match book locations
     if table_name == "position" and "Location_Code" in fields:
         overrides["Location_Code"] = {"values": GLOBAL_LOCATIONS, "random": True}
+
+    # Override Currency_Id in sensitivity tables to ensure all 4 trading
+    # currencies appear, matching position.Currency_Code for FX conversion.
+    if table_name in SENSITIVITY_TABLES and "Currency_Id" in fields:
+        if isinstance(fields["Currency_Id"], StringType):
+            overrides["Currency_Id"] = {"values": ["CHF", "EUR", "GBP", "USD"], "random": True}
 
     return overrides
 
@@ -343,21 +393,18 @@ def _add_book_path(df):
 # COMMAND ----------
 
 # position_risk_greeks_* are excluded — derived via join in Step 3b
+# fx_rates is excluded — generated deterministically in Step 3a
 GENERATION_ORDER = [
-    "book_universe", "instrument", "radial_instrument", "fx_rates",
-    "position", "package_composition",
-    "radial_arbrules", "radial_monikers",
-    "radial_pnl_sensitivity_commodities",
+    "book_universe", "instrument",
+    "position",
     # Unit sensitivities — must be generated before position risk greeks
     "radial_unit_sensitivities_asset_greeks",
     "radial_unit_sensitivities_asset_greeks_fully_decomposed",
-    "radial_unit_sensitivities_instruments_greeks",
 ]
 
 RISK_GREEKS_TABLES = {
     "position_risk_greeks_assetlevel",
     "position_risk_greeks_currency",
-    "position_risk_greeks_instrumentlevel",
 }
 
 ordered_names = [n for n in GENERATION_ORDER if n in samples]
@@ -448,6 +495,71 @@ for table_name in ordered_names:
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## Step 3a: Generate Deterministic FX Rates for GBP Conversion
+# MAGIC
+# MAGIC Monthly FX rates for the 4 trading currencies (CHF, EUR, GBP, USD) with
+# MAGIC `Reporting_Currency = 'GBP'`. Rates drift ±5% around realistic base values so
+# MAGIC downstream silver tables can LEFT JOIN to convert `Sensitivity_Value` to GBP.
+# MAGIC
+# MAGIC FK relationship: `Risk_Greeks.Currency_Id` → `FX_Rates.Base_Currency`
+
+# COMMAND ----------
+
+FX_BASE_RATES = [("CHF", 0.87), ("EUR", 0.86), ("USD", 0.79), ("GBP", 1.00)]
+
+_month_spine_fx = spark.sql(f"""
+    SELECT explode(sequence(
+        DATE_TRUNC('MONTH', DATE '{DATE_BEGIN}'),
+        DATE_TRUNC('MONTH', DATE '{DATE_END}'),
+        INTERVAL 1 MONTH
+    )) AS Business_Date
+""")
+
+_fx_base = spark.createDataFrame(FX_BASE_RATES, ["Base_Currency", "_base_rate"])
+_fx_df = _fx_base.crossJoin(_month_spine_fx)
+
+# Hash-based ±5% monthly drift for non-GBP; GBP/GBP is always 1.0
+_fx_df = (
+    _fx_df
+    .withColumn("Reporting_Currency", F.lit("GBP"))
+    .withColumn(
+        "Fx_Rate",
+        F.when(F.col("Base_Currency") == "GBP", 1.0)
+         .otherwise(
+            F.col("_base_rate") * (
+                0.95 + 0.10 * (
+                    F.abs(F.hash(F.concat(
+                        F.col("Base_Currency"),
+                        F.lit("_"),
+                        F.col("Business_Date").cast("string"),
+                    ))) % 1000
+                ) / 1000.0
+            )
+        )
+    )
+    .drop("_base_rate")
+)
+
+# Pad remaining sample columns with nulls to match the RADIAL schema
+if "fx_rates" in samples:
+    for field in samples["fx_rates"].schema.fields:
+        if field.name not in _fx_df.columns:
+            _fx_df = _fx_df.withColumn(field.name, F.lit(None).cast(field.dataType))
+
+_fx_count = _fx_df.count()
+results["fx_rates"] = {
+    "df": _fx_df,
+    "rows": _fx_count,
+    "cols": len(_fx_df.columns),
+    "elapsed": 0,
+    "sample_rows": samples["fx_rates"].count() if "fx_rates" in samples else 0,
+}
+print(f"  fx_rates: {_fx_count} deterministic monthly GBP rates "
+      f"({len(FX_BASE_RATES)} currencies × {_month_spine_fx.count()} months)")
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## Step 3b: Derive Position Risk Greeks via Join
 # MAGIC
 # MAGIC Position risk greeks are not generated independently — they are the join product of
@@ -459,7 +571,6 @@ for table_name in ordered_names:
 RISK_GREEKS_JOIN_MAP = {
     "position_risk_greeks_assetlevel":     "radial_unit_sensitivities_asset_greeks",
     "position_risk_greeks_currency":        "radial_unit_sensitivities_asset_greeks_fully_decomposed",
-    "position_risk_greeks_instrumentlevel": "radial_unit_sensitivities_instruments_greeks",
 }
 
 
@@ -556,6 +667,13 @@ def build_risk_greeks_via_join(spark, risk_table, position_df, unit_sens_df,
     for field in target_fields:
         if field.name not in joined.columns:
             joined = joined.withColumn(field.name, F.lit(None).cast(field.dataType))
+
+    # Add Primary_Asset_Ref to the currency-decomposed table so analysts can
+    # aggregate risk exposure by stock ticker across books and time.
+    if risk_table == "position_risk_greeks_currency":
+        joined = _add_primary_asset_ref(joined)
+        if "Primary_Asset_Ref" not in target_col_names:
+            target_col_names = target_col_names + ["Primary_Asset_Ref"]
 
     result = joined.select(target_col_names)
 
