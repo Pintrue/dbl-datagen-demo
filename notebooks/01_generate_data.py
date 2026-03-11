@@ -496,6 +496,10 @@ def build_risk_greeks_via_join(spark, risk_table, position_df, unit_sens_df,
         dedup_keys = ["Parent_Instrument_Id", "Parent_Instrument_Id_Type", "Sensitivity_Type"]
         unit_cols  = ["Parent_Instrument_Id", "Parent_Instrument_Id_Type",
                       "Sensitivity_Type", "Sensitivity_Value"]
+    # Carry Currency_Id through from unit_sens (needed for currency-decomposed tables)
+    if "Currency_Id" in unit_sens_df.columns:
+        dedup_keys = dedup_keys + ["Currency_Id"]
+        unit_cols  = unit_cols + ["Currency_Id"]
 
     unit_sens_slim = unit_sens_df.dropDuplicates(dedup_keys).select(unit_cols)
 
