@@ -19,6 +19,22 @@ An AI-powered financial risk intelligence platform built on Databricks, demonstr
 - **Deterministic FX rates** (CHF/EUR/USD/GBP → GBP) with monthly drift for currency conversion
 - **FK-consistent IDs** — all joins work across synthetic tables
 
+### Data scale (at `scale=1.0`, `years=10`)
+
+| Table | Size | Rows |
+|-------|------|------|
+| `position_risk_greeks_assetlevel` | 13.6 GB | 2,143,646,040 |
+| `position_risk_greeks_currency` | 6.5 GB | 1,026,720,360 |
+| `silver_risk_asset_book_monthly` | 1.9 GB | 169,536,480 |
+| `position` | 669 MB | 90,000,000 |
+| `radial_unit_sensitivities_asset_greeks` | 278 MB | 20,000,000 |
+| `radial_unit_sensitivities_asset_greeks_fully_decomposed` | 227 MB | 20,000,000 |
+| `silver_risk_book_level_monthly` | 16 MB | 1,211,520 |
+| `instrument` | 12 MB | 400,000 |
+| `book_universe` / `silver_book_hierarchy_flat` | 0.1 MB | 2,000 |
+| `fx_rates` | <0.1 MB | 480 |
+| **Total** | **23.1 GB** | **3.47 billion** |
+
 ### FX conversion
 
 All risk exposure values are converted to GBP at the silver layer. The two materialized silver tables LEFT JOIN with `fx_rates` on `Currency_Id = Base_Currency` and multiply `Sensitivity_Value` by `COALESCE(avg_rate, 1.0)`. When customers plug in real FX rates, the conversion works automatically.
