@@ -28,7 +28,10 @@ WAREHOUSE_ID = dbutils.widgets.get("warehouse_id")
 
 # COMMAND ----------
 
-%pip install "databricks-sdk>=0.40.0" --quiet
+# MAGIC %pip install "databricks-sdk>=0.40.0" --quiet
+
+# COMMAND ----------
+
 dbutils.library.restartPython()
 
 # COMMAND ----------

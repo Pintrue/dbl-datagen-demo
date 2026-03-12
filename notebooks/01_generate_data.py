@@ -15,7 +15,10 @@
 
 # COMMAND ----------
 
-%pip install dbldatagen "numpy<2" --quiet
+# MAGIC %pip install dbldatagen "numpy<2" --quiet
+
+# COMMAND ----------
+
 dbutils.library.restartPython()
 
 # COMMAND ----------
