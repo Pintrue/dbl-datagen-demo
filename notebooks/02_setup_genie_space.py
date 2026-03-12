@@ -28,6 +28,11 @@ WAREHOUSE_ID = dbutils.widgets.get("warehouse_id")
 
 # COMMAND ----------
 
+%pip install "databricks-sdk>=0.40.0" --quiet
+dbutils.library.restartPython()
+
+# COMMAND ----------
+
 import json
 from databricks.sdk import WorkspaceClient
 
