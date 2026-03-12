@@ -68,6 +68,7 @@ Throughout all commands below, replace these placeholders with your actual value
 
 | Placeholder | Description | Example |
 |---|---|---|
+| `YOUR_WORKSPACE` | Databricks workspace URL | `https://myworkspace.cloud.databricks.com` |
 | `YOUR_CATALOG` | Unity Catalog catalog name | `main` |
 | `YOUR_SCHEMA` | Schema for generated tables | `atlas_radial_demo` |
 | `YOUR_SAMPLE_SCHEMA` | Schema where the sample Volume lives (can be the same) | `atlas_radial_demo` |
@@ -97,6 +98,7 @@ The dashboard JSON (`resources/atlas_radial_risk.lvdash.json`) embeds SQL querie
 ```bash
 # Deploy lightweight dev dataset (scale=0.1, years=1)
 databricks bundle deploy \
+  --var="host=YOUR_WORKSPACE" \
   --var="catalog=YOUR_CATALOG" \
   --var="schema=YOUR_SCHEMA" \
   --var="sample_schema=YOUR_SAMPLE_SCHEMA"
@@ -110,6 +112,7 @@ databricks bundle run atlas_radial_data_generation
 ```bash
 # Deploy full dataset + dashboard
 databricks bundle deploy --target prod \
+  --var="host=YOUR_WORKSPACE" \
   --var="catalog=YOUR_CATALOG" \
   --var="schema=YOUR_SCHEMA" \
   --var="sample_schema=YOUR_SAMPLE_SCHEMA" \
@@ -223,6 +226,7 @@ Pass the `scale` variable in the deploy command:
 
 ```bash
 databricks bundle deploy --target prod \
+  --var="host=YOUR_WORKSPACE" \
   --var="catalog=YOUR_CATALOG" \
   --var="schema=YOUR_SCHEMA" \
   --var="sample_schema=YOUR_SAMPLE_SCHEMA" \

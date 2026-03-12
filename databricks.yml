@@ -24,16 +24,21 @@ variables:
     description: "Optional: full path to the directory containing the RADIAL .dat files. Defaults to /Volumes/{catalog}/{sample_schema}/radial_sample/RADIALSAMPLE"
     default: ""
 
+# Authentication:
+#   Option A: databricks configure --profile myworkspace  (then pass --profile myworkspace)
+#   Option B: export DATABRICKS_HOST=https://YOUR_WORKSPACE.cloud.databricks.com
+#             export DATABRICKS_TOKEN=dapi...
+#
 # Deployment targets:
 #
 # DEV (default) — lightweight dataset in a separate schema, no dashboard:
-#   databricks bundle deploy -var="catalog=YOUR_CATALOG" -var="schema=YOUR_SCHEMA"
-#   databricks bundle run atlas_radial_data_generation
+#   databricks bundle deploy --profile myworkspace --var="catalog=YOUR_CATALOG" --var="schema=YOUR_SCHEMA" --var="sample_schema=YOUR_SAMPLE_SCHEMA"
+#   databricks bundle run atlas_radial_data_generation --profile myworkspace
 #   → schema: dev_<username>_<schema>, scale: 0.1 (~2M risk rows, fast)
 #
 # PROD — full-scale dataset + dashboard:
-#   databricks bundle deploy --target prod -var="catalog=YOUR_CATALOG" -var="schema=YOUR_SCHEMA" -var="warehouse_id=YOUR_WAREHOUSE_ID"
-#   databricks bundle run atlas_radial_data_generation --target prod
+#   databricks bundle deploy --target prod --profile myworkspace --var="catalog=YOUR_CATALOG" --var="schema=YOUR_SCHEMA" --var="sample_schema=YOUR_SAMPLE_SCHEMA" --var="warehouse_id=YOUR_WAREHOUSE_ID"
+#   databricks bundle run atlas_radial_data_generation --target prod --profile myworkspace
 #   → schema: <schema>, scale: 1.0 (~20M risk rows)
 
 targets:
@@ -42,7 +47,6 @@ targets:
     mode: development
     default: true
     variables:
-      schema: dev_${workspace.current_user.short_name}_${var.schema}
       scale: "0.1"
       years: "1"
     resources:
@@ -56,7 +60,6 @@ targets:
     workspace:
       root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
     variables:
-      schema: ${var.schema}
       scale: "1.0"
     resources:
       jobs:
