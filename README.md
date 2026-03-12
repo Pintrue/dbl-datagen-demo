@@ -9,7 +9,9 @@
 
 An AI-powered financial risk intelligence platform built on Databricks, demonstrating how a trading risk analyst can explore 10 years of synthetic RADIAL trading data through interactive dashboards and natural language queries.
 
-Risk managers and traders use the **AI/BI Dashboard** to monitor position concentrations across the book hierarchy and track exposure to individual stocks over time — drilling from group entity down to individual book level, or filtering by region, asset class, and sensitivity type. When they need answers the dashboard doesn't directly show — "How does our NVIDIA exposure in Equities compare to last year?" or "Which legal entity carries the most volatility risk?" — they switch to **Genie**, which translates natural language into SQL against the same gold views, returning results in seconds. Together, the dashboard and Genie give risk teams a self-service analytics layer over their RADIAL data without requiring SQL expertise or ad-hoc report requests.
+Risk managers and traders use the **AI/BI Dashboard** to monitor position concentrations across the book hierarchy and track exposure to individual stocks over time — drilling from group entity down to individual book level, or filtering by region, asset class, and sensitivity type.
+
+When they need answers the dashboard doesn't directly show — "How does our NVIDIA exposure in Equities compare to last year?" or "Which legal entity carries the most volatility risk?" — they switch to **Genie**, which translates natural language into SQL against the same gold views, returning results in seconds. Together, the dashboard and Genie give risk teams a self-service analytics layer over their RADIAL data without requiring SQL expertise or ad-hoc report requests.
 
 ### What's in the data
 
