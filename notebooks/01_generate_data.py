@@ -15,6 +15,11 @@
 
 # COMMAND ----------
 
+%pip install dbldatagen "numpy<2" --quiet
+dbutils.library.restartPython()
+
+# COMMAND ----------
+
 import math
 import dbldatagen as dg
 from pyspark.sql.types import *
